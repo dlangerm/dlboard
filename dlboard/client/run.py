@@ -436,19 +436,28 @@ def _jsonable_fallback(value: object) -> JsonValue:  # dlboard-ignore[forbid-str
             return str(value)
 
 
-def _flatten_json(value: JsonValue, prefix: str) -> dict[str, models.ValidJsonTypes]:
-    """Join nested dict keys with `"/"`, and keep a list as one JSON string -- a hparam is a single cell."""
+def _flatten_json(
+    value: JsonValue, prefix: str | None, into: dict[str, models.ValidJsonTypes], collided: set[str]
+) -> None:
+    """
+    Put `value` into `into` with its nested dict keys joined with `"/"`, noting in `collided` a name given twice.
+
+    `prefix` is the name it is under, `None` for the config itself. A list, and an empty nested dict, is kept as one
+    JSON string: a hparam is a single cell, and `{}` says it was set.
+    """
     match value:
-        case dict():
-            return {
-                key: leaf
-                for name, child in value.items()
-                for key, leaf in _flatten_json(child, f"{prefix}/{name}" if prefix else name).items()
-            }
-        case list():
-            return {prefix: json.dumps(value)}
+        case dict() if value or prefix is None:
+            for name, child in value.items():
+                _flatten_json(child, f"{prefix}/{name}" if prefix else name, into, collided)
+            return
+        case dict() | list():
+            leaf: models.ValidJsonTypes = json.dumps(value)
         case str() | int() | float() | bool() | None:
-            return {prefix: value}
+            leaf = value
+    name = prefix or ""  # a config that is itself one value (not a mapping) is named nothing
+    if name in into:
+        collided.add(name)
+    into[name] = leaf
 
 
 def flatten_hparams(params: Mapping[str, Any] | Namespace | BaseModel) -> models.FlatHparamDict:
@@ -458,9 +467,19 @@ def flatten_hparams(params: Mapping[str, Any] | Namespace | BaseModel) -> models
     Pydantic does the serializing, so a `BaseModel`, a pydantic dataclass (and its own aliases and
     field serializers), a stdlib dataclass, a `Namespace`, an enum or a tuple all just work, nested
     arbitrarily. Nested keys are joined with `"/"`, which is also how the experiment page groups
-    them. A list stays one value (as a JSON string). Scalars pass through untouched.
+    them. A list stays one value (as a JSON string), and so does an empty nested config (`{}`). Scalars
+    pass through untouched. Two values joined to one name (`{"a/b": 1, "a": {"b": 2}}`) keep the later
+    one, as Lightning's loggers do, with a warning naming it.
     """
-    return _flatten_json(to_jsonable_python(params, fallback=_jsonable_fallback), "")
+    flat: dict[str, models.ValidJsonTypes] = {}
+    collided: set[str] = set()
+    _flatten_json(to_jsonable_python(params, fallback=_jsonable_fallback), None, flat, collided)
+    if collided:
+        warn(
+            f"hyperparameters {sorted(collided)} are each given twice once nested keys are joined with '/': "
+            "only the later value of each is logged"
+        )
+    return flat
 
 
 def _place_run(  # noqa: PLR0913 -- where a run can be given to go, each once

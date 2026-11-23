@@ -46,6 +46,8 @@ Everything below is the same for both: `logger.log_artifact(...)`, `logger.log_h
 **Hyperparameters.**
 `init(hparams=...)`, `save_hyperparameters()` (or `logger.log_hyperparams(...)`) takes anything nested: pydantic models, pydantic and stdlib dataclasses, a `Namespace`, plain dicts and ordinary init args.
 They're flattened to `parent/child` keys (`optim/schedule/warmup_steps`), which the experiment page's hyperparameter columns and run compare group on the same `/`.
+An empty nested config is logged as `{}`, so the page shows it was set.
+Two values that flatten to one name (`{"a/b": 1, "a": {"b": 2}}`) keep the later one, with a warning naming it.
 Pydantic serializes them, so a model's aliases and field serializers apply; a list is stored as one JSON string, and scalars are stored exactly as given.
 
 **Checkpoints.**

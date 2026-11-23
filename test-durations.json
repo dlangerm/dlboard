@@ -257,7 +257,7 @@
   "dlboard/client/tests/run_test.py::test_flatten_hparams_joins_nested_configs_with_slashes[pydantic-dataclass]": 0.0011154179996992752,
   "dlboard/client/tests/run_test.py::test_flatten_hparams_joins_nested_configs_with_slashes[stdlib-dataclass]": 0.00120938500003831,
   "dlboard/client/tests/run_test.py::test_flatten_hparams_joins_nested_configs_with_slashes[unserializable-becomes-text]": 0.0012098789998162829,
-  "dlboard/client/tests/run_test.py::test_flatten_hparams_names_each_scalar_of_a_nested_config_by_its_path": 0.11409979900054168,
+  "dlboard/client/tests/run_test.py::test_flatten_hparams_names_each_value_of_a_nested_config_by_its_path": 0.13881061099891667,
   "dlboard/client/tests/run_test.py::test_init_starts_a_named_run_in_the_project_and_experiment_it_names": 0.004402285000196571,
   "dlboard/client/tests/run_test.py::test_log_figure_queues_a_png_rendered_at_the_call_site": 0.07523199600018415,
   "dlboard/client/tests/run_test.py::test_log_histograms_queues_buckets_not_values": 0.0025078809999286023,

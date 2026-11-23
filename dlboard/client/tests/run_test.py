@@ -530,36 +530,43 @@ class _Config(pydantic.BaseModel):
         return f"{lr:.0e}"
 
 
-# Keys without a slash and no empty config: one that has either is flattened in ways nobody chose (#775).
 _SCALARS = st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text(max_size=3)
-_CONFIG_KEYS = st.text(
-    st.characters(exclude_characters="/", exclude_categories=["Cs"]), min_size=1, max_size=3
-)
+_CONFIG_KEYS = st.text("ab/", max_size=3)  # few, with slashes, so a joined name is often given twice
 
 
 def _nested(inner: st.SearchStrategy[Any]) -> st.SearchStrategy[Any]:
-    return st.dictionaries(_CONFIG_KEYS, _SCALARS | inner, min_size=1, max_size=3)
+    return st.dictionaries(_CONFIG_KEYS, _SCALARS | inner, max_size=3)
 
 
-_CONFIGS = st.recursive(
-    st.dictionaries(_CONFIG_KEYS, _SCALARS, min_size=1, max_size=3), _nested, max_leaves=10
-)
+_CONFIGS = st.recursive(st.dictionaries(_CONFIG_KEYS, _SCALARS, max_size=3), _nested, max_leaves=10)
 
 
-def _paths(config: dict[str, Any], prefix: str = "") -> dict[str, Any]:
-    """Each scalar of `config` by the path of keys to it."""
-    return {
-        path: value
+def _paths(config: dict[str, Any], prefix: str = "") -> list[tuple[str, Any]]:
+    """Each value of `config` by the path of keys to it, in order; an empty nested config is `{}`."""
+    return [
+        (path, value)
         for key, nested in config.items()
         for path, value in (
-            _paths(nested, f"{prefix}{key}/") if isinstance(nested, dict) else {f"{prefix}{key}": nested}
-        ).items()
-    }
+            _paths(nested, f"{prefix}/{key}" if prefix else key)
+            if isinstance(nested, dict) and nested
+            else [(f"{prefix}/{key}" if prefix else key, "{}" if isinstance(nested, dict) else nested)]
+        )
+    ]
 
 
 @given(_CONFIGS)
-def test_flatten_hparams_names_each_scalar_of_a_nested_config_by_its_path(config: dict[str, Any]) -> None:
-    assert run.flatten_hparams(config) == _paths(config)
+@example({"a/b": 1, "a": {"b": 2}})  # #775: two values joined to one name
+@example({"scheduler_kwargs": {}})  # #775: an empty config is still logged
+def test_flatten_hparams_names_each_value_of_a_nested_config_by_its_path(config: dict[str, Any]) -> None:
+    """Two values joined to one name keep the later, with a warning naming it."""
+    paths = _paths(config)
+
+    with warnings.catch_warnings(record=True) as warned:
+        warnings.simplefilter("always")
+        flat = run.flatten_hparams(config)
+
+    assert flat == dict(paths)
+    assert bool(warned) is (len(dict(paths)) < len(paths))
 
 
 @pytest.mark.parametrize(
