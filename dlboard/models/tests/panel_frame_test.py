@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import pendulum
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from pydantic import ValidationError
 
 from dlboard.models import (
-    ARTIFACT_COLUMN_PREFIX,
-    HISTOGRAM_COLUMN_PREFIX,
-    HPARAM_COLUMN_PREFIX,
+    Artifact,
     ColumnKind,
+    LoggedMetrics,
+    NewArtifact,
     SeriesBandRequest,
     artifact_column,
     artifact_fname_column,
@@ -21,15 +23,56 @@ from dlboard.models import (
     histogram_column,
     hparam_column,
 )
+from dlboard.models._column_affixes import (
+    ARTIFACT_COLUMN_SUFFIXES,
+    COLUMN_PREFIXES,
+    is_misread_artifact_key,
+    misread_metric_keys,
+)
+
+_TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 # Keys that share their starts and their slashes, so a prefix asks for some of them and not others. A key spelled like
-# a column dlboard makes itself (`artifact__`, `__tags`, ...) is misread: #774.
+# a column dlboard makes itself (`artifact__`, `__tags`, ...) is refused where it is logged (#774), so none is here.
 _KEYS = st.text(alphabet="ab/_", max_size=5).filter(
-    lambda key: (
-        not key.startswith((HPARAM_COLUMN_PREFIX, ARTIFACT_COLUMN_PREFIX, HISTOGRAM_COLUMN_PREFIX))
-        and not key.endswith(("__tags", "__fname", "__logged"))
-    )
+    lambda key: not misread_metric_keys([key]) and not is_misread_artifact_key(key)
 )
+# Keys that are often spelled like one of those columns.
+_SPELLED_LIKE_A_COLUMN = st.tuples(
+    st.sampled_from(["", *COLUMN_PREFIXES]),
+    st.text("ab_", max_size=3),
+    st.sampled_from(["", *ARTIFACT_COLUMN_SUFFIXES]),
+).map("".join)
+
+
+@given(_SPELLED_LIKE_A_COLUMN)
+def test_a_metric_key_is_logged_only_if_it_reads_back_as_a_metric(key: str) -> None:
+    try:
+        LoggedMetrics(metrics={key: 1.0}, step=0, experiment_id=1, run_id=1, timestamp_utc=_TS)
+    except ValidationError:
+        assert column_kind(key) is not ColumnKind.METRIC
+    else:
+        assert column_kind(key) is ColumnKind.METRIC
+
+
+@given(_SPELLED_LIKE_A_COLUMN)
+def test_an_artifact_key_is_logged_only_if_its_charts_find_it_by_its_name(key: str) -> None:
+    """One stored before such keys were refused still reads back."""
+    columns = [
+        artifact_column(key),
+        artifact_tags_column(key),
+        artifact_fname_column(key),
+        artifact_logged_column(key),
+    ]
+    fields = {"key": key, "fname": "a.png", "run_id": 1, "experiment_id": 1, "step": 0}
+
+    try:
+        NewArtifact(**fields)
+    except ValidationError:
+        assert artifact_keys_in(columns, key, prefix=False) != [key]
+    else:
+        assert artifact_keys_in(columns, key, prefix=False) == [key]
+    assert Artifact(**fields, ref="file:///a.png").key == key
 
 
 @given(keys=st.lists(_KEYS, unique=True), name=_KEYS, prefix=st.booleans())

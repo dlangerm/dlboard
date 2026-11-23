@@ -43,6 +43,10 @@ See `examples/lightning_quickstart.py` for a complete, runnable example (MNIST M
 
 Everything below is the same for both: `logger.log_artifact(...)`, `logger.log_histograms(...)` and the rest are a run's `run.log_artifact(...)`, `run.log_histograms(...)`, ..., and `logger.finalize(...)` is `run.finish(...)`.
 
+**Keys dlboard keeps for itself.**
+A metric can't be named `step`, `run_id` or another of the fixed columns, nor start with `hparam__`, `artifact__`, `histogram__` or `series_band__`, and an artifact's key can't end with `__tags`, `__fname` or `__logged`: the charts would read such a key as one of their own columns.
+The call that logs one raises, naming the key.
+
 **Hyperparameters.**
 `init(hparams=...)`, `save_hyperparameters()` (or `logger.log_hyperparams(...)`) takes anything nested: pydantic models, pydantic and stdlib dataclasses, a `Namespace`, plain dicts and ordinary init args.
 They're flattened to `parent/child` keys (`optim/schedule/warmup_steps`), which the experiment page's hyperparameter columns and run compare group on the same `/`.

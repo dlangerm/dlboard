@@ -14,6 +14,16 @@ import hashlib
 import json
 import typing
 
+from dlboard.models._column_affixes import (
+    ARTIFACT_COLUMN_PREFIX,
+    ARTIFACT_COLUMN_SUFFIXES,
+    ARTIFACT_FNAME_SUFFIX,
+    ARTIFACT_LOGGED_SUFFIX,
+    ARTIFACT_TAGS_SUFFIX,
+    HISTOGRAM_COLUMN_PREFIX,
+    HPARAM_COLUMN_PREFIX,
+    SERIES_BAND_COLUMN_PREFIX,
+)
 from dlboard.models._key_patterns import KeyPatterns
 from dlboard.models._metric import MetricColumn
 from dlboard.models._view import ColumnKind
@@ -49,19 +59,6 @@ NO_DATA_COLUMNS: typing.Final = frozenset({*MetricColumn, RUN_NAME_COLUMN, EXPER
 
 IDENTITY_COLUMNS: typing.Final = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN, EXPERIMENT_COLUMN})
 """Which run a row belongs to, and what to call it: part of what every chart shows, though no chart asks for them."""
-
-HPARAM_COLUMN_PREFIX: typing.Final = "hparam__"
-"""Hyperparameter columns are merged into the same wide dataframe as metrics/artifacts, prefixed
-so a hparam key can never collide with a same-named metric or artifact column."""
-
-ARTIFACT_COLUMN_PREFIX: typing.Final = "artifact__"
-"""Artifact columns are prefixed for the same reason -- see `artifact_column`/`artifact_tags_column`."""
-
-HISTOGRAM_COLUMN_PREFIX: typing.Final = "histogram__"
-"""Histogram columns are prefixed for the same reason; each cell holds a `Histogram`, or NaN where the key was not logged."""
-
-SERIES_BAND_COLUMN_PREFIX: typing.Final = "series_band__"
-"""Series-band columns are prefixed for the same reason; each cell holds a `SeriesBand`, or NaN where the grid has no step."""
 
 
 BAND_PROBE_BUDGET: typing.Final = 100_000
@@ -128,11 +125,6 @@ class SeriesBandRequest:
         return {key: label for key, label in labelled.items() if label in kept}
 
 
-_TAGS_SUFFIX: typing.Final = "__tags"
-_FNAME_SUFFIX: typing.Final = "__fname"
-_LOGGED_SUFFIX: typing.Final = "__logged"
-
-
 def histogram_column(key: str) -> str:
     """The panel-dataframe column holding each step's `Histogram` for histogram `key`."""
     return f"{HISTOGRAM_COLUMN_PREFIX}{key}"
@@ -145,12 +137,12 @@ def artifact_column(key: str) -> str:
 
 def artifact_tags_column(key: str) -> str:
     """The panel-dataframe column holding each step's tags dict for artifact `key`."""
-    return f"{artifact_column(key)}{_TAGS_SUFFIX}"
+    return f"{artifact_column(key)}{ARTIFACT_TAGS_SUFFIX}"
 
 
 def artifact_fname_column(key: str) -> str:
     """The panel-dataframe column holding each step's file name for artifact `key` (its URL carries none)."""
-    return f"{artifact_column(key)}{_FNAME_SUFFIX}"
+    return f"{artifact_column(key)}{ARTIFACT_FNAME_SUFFIX}"
 
 
 def artifact_logged_column(key: str) -> str:
@@ -159,7 +151,7 @@ def artifact_logged_column(key: str) -> str:
 
     Its URL, tags and file name are read only for the steps of the window (`ArtifactWindow`): this says where the rest are.
     """
-    return f"{artifact_column(key)}{_LOGGED_SUFFIX}"
+    return f"{artifact_column(key)}{ARTIFACT_LOGGED_SUFFIX}"
 
 
 def artifact_keys_in(columns: Iterable[str], name: str, *, prefix: bool) -> list[str]:
@@ -172,8 +164,7 @@ def artifact_keys_in(columns: Iterable[str], name: str, *, prefix: bool) -> list
     keys = [
         column.removeprefix(ARTIFACT_COLUMN_PREFIX)
         for column in columns
-        if column.startswith(ARTIFACT_COLUMN_PREFIX)
-        and not column.endswith((_TAGS_SUFFIX, _FNAME_SUFFIX, _LOGGED_SUFFIX))
+        if column.startswith(ARTIFACT_COLUMN_PREFIX) and not column.endswith(ARTIFACT_COLUMN_SUFFIXES)
     ]
     return [key for key in keys if (key.startswith(name) if prefix else key == name)]
 

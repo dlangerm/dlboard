@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Final, NamedTuple, TypeVar
 from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
 from dlboard._compat import StrEnum
+from dlboard.models._column_affixes import COLUMN_PREFIXES, misread_metric_keys
 from dlboard.models._histogram import Histogram, UnderlyingHistogramTableEntry
 
 if TYPE_CHECKING:
@@ -117,6 +118,14 @@ class LoggedMetrics(BaseModel, frozen=True, extra="ignore"):
             msg = f"{reserved} are reserved column names and can't be logged as metrics"
             raise ValueError(msg)
         return logged
+
+    @field_validator("metrics")
+    @classmethod
+    def _reject_keys_read_as_other_columns(cls, metrics: dict[str, _Logged]) -> dict[str, _Logged]:
+        if misread := misread_metric_keys(metrics):
+            msg = f"{misread} start like a column of another kind ({list(COLUMN_PREFIXES)}), so charts would misread them (#774)"
+            raise ValueError(msg)
+        return metrics
 
     def to_underlying(self) -> Iterator[UnderlyingMetricTableEntry]:
         """Convert a bulk metrics set into a table entry."""

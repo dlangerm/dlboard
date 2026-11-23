@@ -11,8 +11,7 @@ from dash import dcc
 from dash._utils import to_json
 from pydantic import ValidationError
 
-from dlboard.models import DataRequest, MetricColumn, SeriesBand, SeriesBandRequest
-from dlboard.models._panel_frame import SERIES_BAND_COLUMN_PREFIX
+from dlboard.models import SERIES_BAND_COLUMN_PREFIX, DataRequest, MetricColumn, SeriesBand, SeriesBandRequest
 from dlboard.plugins.charts.series_band import SeriesBandChart, SeriesBandSettings
 from dlboard.serve import series_color
 from dlboard.serve._pages._experiment._panel_data import build_series_band_dataframe

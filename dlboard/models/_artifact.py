@@ -7,10 +7,11 @@ import typing
 from typing import Final, NamedTuple
 
 import pendulum
-from pydantic import AnyUrl, AwareDatetime, BaseModel, Field, TypeAdapter
+from pydantic import AfterValidator, AnyUrl, AwareDatetime, BaseModel, Field, TypeAdapter
 from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
+from dlboard.models._column_affixes import ARTIFACT_COLUMN_SUFFIXES, is_misread_artifact_key
 from dlboard.models._tag import TagValue
 
 if typing.TYPE_CHECKING:
@@ -213,11 +214,18 @@ class AnyArtifact(typing.Protocol):
         ...
 
 
+def _not_misread(key: str) -> str:
+    if is_misread_artifact_key(key):
+        msg = f"an artifact key can't end with {list(ARTIFACT_COLUMN_SUFFIXES)}: its charts would read it as another's (#774)"
+        raise ValueError(msg)
+    return key
+
+
 class NewArtifact(BaseModel, frozen=True, extra="ignore"):
     """An artifact. `extra="ignore"`: this crosses the wire -- see `dlboard._wire`."""
 
-    key: str
-    """Key of this artifact for querying."""
+    key: typing.Annotated[str, AfterValidator(_not_misread)]
+    """Key of this artifact for querying; refused where it is logged if a chart would read it as another's."""
 
     fname: str
     """The key of requests.files"""
@@ -252,6 +260,9 @@ class NewArtifactLink(NewArtifact, frozen=True, extra="ignore"):
 
 class Artifact(NewArtifact, frozen=True, extra="ignore"):
     """Underlying table of artifacts. `extra="ignore"`: this crosses the wire -- see `dlboard._wire`."""
+
+    key: str
+    """As it was stored: one logged before such keys were refused (#774) still reads back."""
 
     id: int | None = None
     """ID in the database."""

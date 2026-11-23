@@ -41,6 +41,12 @@ from dlboard.models._artifact import (
 from dlboard.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
 from dlboard.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
 from dlboard.models._auth import AuthProvider
+from dlboard.models._column_affixes import (
+    ARTIFACT_COLUMN_PREFIX,
+    HISTOGRAM_COLUMN_PREFIX,
+    HPARAM_COLUMN_PREFIX,
+    SERIES_BAND_COLUMN_PREFIX,
+)
 from dlboard.models._comment import Comment, NewComment
 from dlboard.models._comparison import (
     ComparisonFilter,
@@ -73,15 +79,11 @@ from dlboard.models._metric import (
     UnderlyingMetricTableEntry,
 )
 from dlboard.models._panel_frame import (
-    ARTIFACT_COLUMN_PREFIX,
     EXPERIMENT_COLUMN,
-    HISTOGRAM_COLUMN_PREFIX,
-    HPARAM_COLUMN_PREFIX,
     IDENTITY_COLUMNS,
     NO_DATA_COLUMNS,
     RUN_CONTEXT_COLUMN,
     RUN_NAME_COLUMN,
-    SERIES_BAND_COLUMN_PREFIX,
     SeriesBandRequest,
     artifact_column,
     artifact_fname_column,
