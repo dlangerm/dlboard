@@ -16,6 +16,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **A line chart's *max points* is at least 3.**
   Thinning a run's line keeps its first point, its last and one between at the least, so fewer (2, 0, or a negative number) left the line unthinned, every point drawn, the opposite of what it asked for; the editor now refuses them.
   (#746)
+* **A page of histogram charts draws faster.**
+  Each histogram chart had Plotly build a whole figure only to work out where its rows go, 7 ms for one run and 22 ms for fifteen, on every draw; it works them out itself now, with the same layout.
+* **An image chart below the fold loads its pictures only when it is scrolled to.**
+  Every picture of an open panel loaded at once, at full resolution: one panel of six image charts over ten runs fetched 275 MB.
+  Thumbnails now load lazily, so that panel fetches what is in view (137 MB) and the rest as you scroll; smaller thumbnails are #783.
 
 ### Fixed
 
@@ -32,6 +37,14 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **A project page you can't see no longer logs an error.**
   The page that says a project doesn't exist, or that you don't have access to it, still drew the project's pinned runs in the sidebar, which the server refused and logged as an uncaught error, with a traceback, on every visit.
   (#772)
+* **A hyperparameter that is an empty config is logged, and two that flatten to one name warn.**
+  An empty nested config (`scheduler_kwargs={}`) disappeared from the logged hyperparameters; it is logged as `{}`.
+  Two values that flatten to one name (`{"a/b": 1, "a": {"b": 2}}`) still keep the later one, as Lightning's loggers do, but a warning now names it instead of one being dropped silently.
+  (#775)
+* **A metric or artifact key spelled like one of dlboard's own column names is refused where it is logged.**
+  A metric named `artifact__count` (or starting `hparam__`, `histogram__`, `series_band__`) was read by the charts as another kind of column, and an artifact under a key ending `__tags`, `__fname` or `__logged` was never found; logging one now raises, naming the key, and the server refuses it from any other client.
+  Artifacts already stored under such a key still read back.
+  (#774)
 
 ## [0.20.1] - 2026-11-23
 

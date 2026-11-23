@@ -11,6 +11,7 @@ import pytest
 from dash import dcc, html
 from hypothesis import given
 from hypothesis import strategies as st
+from plotly.subplots import make_subplots
 
 from dlboard.conftest import props
 from dlboard.models import (
@@ -27,6 +28,7 @@ from dlboard.plugins.charts.histogram import (
     HistogramChart,
     HistogramChartSettings,
     HistogramDisplay,
+    _rows,
 )
 from dlboard.serve import series_swatch_class
 
@@ -73,6 +75,27 @@ def _values(figure: dict[str, typing.Any], trace: int, field: str) -> np.ndarray
     """One field of one trace of `figure` as an array, a blank (null) as NaN."""
     values: np.ndarray = np.array(typing.cast("list[typing.Any]", figure["data"][trace][field]), dtype=float)
     return values
+
+
+@given(st.integers(1, 40), st.floats(0, 1))
+def test_a_figures_rows_are_laid_out_as_plotlys_subplots_would_lay_them_out(count: int, share: float) -> None:
+    """Without building the figure Plotly builds to work it out, which was most of the chart's drawing time."""
+    spacing = share / max(
+        count - 1, 1
+    )  # as much as Plotly allows: the rows' gaps fill at most the whole height
+
+    expected: dict[str, typing.Any] = make_subplots(
+        rows=count, cols=1, vertical_spacing=spacing
+    ).to_plotly_json()["layout"]
+
+    actual = _rows(count, spacing)
+
+    assert actual.keys() == expected.keys()
+    assert actual["template"] == expected["template"]
+    for axis in (key for key in expected if key != "template"):
+        assert actual[axis]["anchor"] == expected[axis]["anchor"]
+        domain: list[float] = expected[axis]["domain"]
+        assert actual[axis]["domain"] == pytest.approx(domain)
 
 
 @st.composite

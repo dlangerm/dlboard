@@ -25,8 +25,8 @@ import dash_mantine_components as dmc
 import numpy as np
 import pandas as pd
 import plotly.colors
+import plotly.graph_objects as go
 from dash import dcc, html
-from plotly.subplots import make_subplots
 from pydantic import BaseModel, Field, PositiveFloat, PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -269,6 +269,29 @@ def _axis_id(letter: typing.Literal["x", "y"], row: int) -> str:
     return f"{letter}{row if row > 1 else ''}"
 
 
+_TEMPLATE: typing.Final = go.Figure().to_plotly_json()["layout"]["template"]
+"""Plotly's default template, as every figure it builds carries it: made once, not once a figure."""
+
+
+def _rows(count: int, spacing: float) -> dict[str, typing.Any]:
+    """
+    The layout of `count` rows stacked top to bottom, `spacing` apart (a fraction of the figure's height).
+
+    What `make_subplots(rows=count, cols=1, vertical_spacing=spacing)` lays out, worked out here: it builds a whole
+    Plotly figure to do it, and was most of a histogram chart's drawing time.
+    """
+    height = (1 - spacing * (count - 1)) / count
+    layout: dict[str, typing.Any] = {"template": _TEMPLATE}
+    for row in range(1, count + 1):
+        low = (count - row) * (height + spacing)
+        layout[f"xaxis{row if row > 1 else ''}"] = {"anchor": _axis_id("y", row), "domain": [0.0, 1.0]}
+        layout[f"yaxis{row if row > 1 else ''}"] = {
+            "anchor": _axis_id("x", row),
+            "domain": [low, low + height],
+        }
+    return layout
+
+
 def _plot(
     runs: list[_Run],
     settings: HistogramChartSettings,
@@ -287,12 +310,7 @@ def _plot(
     slider = settings.display is HistogramDisplay.STEP
     height = _figure_height(len(runs), settings, layout)
     rows_px = height - _MARGIN.top - _MARGIN.bottom - (_SLIDER_PX if slider else 0)
-    rows = make_subplots(
-        rows=len(runs),
-        cols=1,
-        vertical_spacing=layout.row_gap_px / rows_px,
-    )
-    figure: dict[str, typing.Any] = rows.to_plotly_json()["layout"]
+    figure = _rows(len(runs), layout.row_gap_px / rows_px)
     for row, (x_axis, y_axis) in enumerate(axes, start=1):
         figure[f"xaxis{row if row > 1 else ''}"].update(x_axis)
         figure[f"yaxis{row if row > 1 else ''}"].update(y_axis)

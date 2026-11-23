@@ -545,6 +545,7 @@
   "dlboard/plugins/charts/tests/file_list_chart_test.py::test_render_says_so_when_there_is_nothing_logged[no-such-prefix]": 0.0015198420005617663,
   "dlboard/plugins/charts/tests/file_list_chart_test.py::test_the_page_size_is_a_setting": 0.0025012180012708995,
   "dlboard/plugins/charts/tests/file_list_chart_test.py::test_what_the_list_needs_fetched_follows_whether_it_names_a_key_or_a_prefix": 0.0009789399991859682,
+  "dlboard/plugins/charts/tests/histogram_chart_test.py::test_a_figures_rows_are_laid_out_as_plotlys_subplots_would_lay_them_out": 3.8011331820016494,
   "dlboard/plugins/charts/tests/histogram_chart_test.py::test_a_key_nothing_logged_says_so_instead_of_drawing[df0]": 0.0011633650028670672,
   "dlboard/plugins/charts/tests/histogram_chart_test.py::test_a_key_nothing_logged_says_so_instead_of_drawing[df1]": 0.0011601610021898523,
   "dlboard/plugins/charts/tests/histogram_chart_test.py::test_bands_are_a_median_inside_nested_spreads_per_run": 0.0114921950007556,

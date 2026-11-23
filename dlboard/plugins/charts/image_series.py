@@ -609,6 +609,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 h=None if parameters.native_size else parameters.height,
                 fit="contain",
                 style=thumb_style,
+                attributes={"root": {"loading": "lazy", "decoding": "async"}},
             )
             children = [
                 dmc.Text(
