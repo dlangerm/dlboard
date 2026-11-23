@@ -138,10 +138,19 @@ def _create_project_and_experiment(page: Page, live_server_url: str, name: str) 
 
 
 def _diff_selected_runs(page: Page, count: int = 2) -> None:
-    """Select the newest `count` runs of the run table, and diff them from the bar that offers it once a run is selected."""
-    rows = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row")
+    """
+    Select the newest `count` runs of the run table, and diff them from the bar that offers it once a run is selected.
+
+    A row is found by where it is shown (`row-index`), not by its place in the DOM: ag-grid keeps the DOM in the order
+    the rows were drawn in, which is not the order they are shown in while it is still drawing them.
+    """
     for index in range(count):
-        rows.nth(index).locator(".ag-selection-checkbox input").check()
+        box = page.locator(
+            f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row[row-index='{index}'] "
+            ".ag-selection-checkbox input"
+        )
+        box.check()
+        expect(box).to_be_checked()
     page.get_by_role("button", name="Diff").click()
 
 
