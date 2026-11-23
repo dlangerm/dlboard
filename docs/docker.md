@@ -95,7 +95,7 @@ These are the ones every deployment needs; the full lists (TLS, pooling, timeout
 settings table).
 
 | Variable | Required | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_POSTGRES_HOST` | yes | Also `_PORT` (5432), `_DATABASE` (`dlboard`), `_USER` (`dlboard`), `_PASSWORD`. |
 | `DLBOARD_ARTIFACT_STORE_LOCATION` | no | Where artifact blobs land inside the container. Defaults to `/data/artifacts` — mount a volume at `/data` to persist them. |
 | `DLBOARD_SECRET_KEY` | yes | Signs session cookies for the password auth plugin this image runs. A missing one is a startup error, not a silent fall-through to anonymous access — generate one with `openssl rand -hex 32`. |

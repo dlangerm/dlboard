@@ -6,7 +6,7 @@ Who is making a request, and what they're allowed to see and do. It's split in t
 first part is a plugin:
 
 | Layer | Owned by | Answers |
-|---|---|---|
+| --- | --- | --- |
 | **Authentication** | an `AuthProvider` plugin — swappable | How does a *person* prove who they are? |
 | **API tokens** | core | How does a *training script* prove who it is? (the same way under every provider) |
 | **Authorization** | core, always on | What may this user see or change? |
@@ -53,7 +53,7 @@ Access is per project. Experiments, runs, metrics, artifacts, views and notes in
 their project:
 
 | Role | Can |
-|---|---|
+| --- | --- |
 | `viewer` | read everything, post notes, save personal views |
 | `editor` | + log runs/metrics/artifacts, create experiments, edit the shared layout, soft-delete within the project, keep a run, hold an experiment to a stricter [retention](../retention.md) rule |
 | `owner` | + manage members and sharing, rename or delete the project, set its retention rule, release or delete a kept run |
@@ -113,7 +113,7 @@ Either way, a new account sees only the projects that let it: one shared with it
 one that gives everyone a role (which `DLBOARD_NEW_PROJECT_ACCESS`, below, does for each new project).
 
 | Setting | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_SECRET_KEY` | — (required) | Signs session cookies. Startup fails without it. |
 | `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames made admin whenever they sign in. |
 | `DLBOARD_ADMIN_GROUPS` | none | Comma-separated IdP groups whose members are made admin. |

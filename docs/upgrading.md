@@ -63,7 +63,7 @@ version against it. Anything logged after the backup is lost, so decide quickly.
 ## Version skew
 
 | Client | Server | Result |
-|---|---|---|
+| --- | --- | --- |
 | Older | Newer, same REST API major | Works. |
 | Newer | Older, same REST API major | Works, but newer features may not be there. |
 | Different API major | | The client refuses to start and says which versions disagree. |

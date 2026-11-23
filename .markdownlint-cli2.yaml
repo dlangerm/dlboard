@@ -1,0 +1,9 @@
+# markdownlint (https://github.com/DavidAnson/markdownlint) checks the Markdown's structure: headings, lists, fences,
+# links. Vale (`.vale.ini`) checks its sentences.
+config:
+  default: true
+  # One sentence per line (Vale's Dlboard.OneSentencePerLine) leaves a long sentence on one long line.
+  MD013: false
+  # The CHANGELOG repeats "Added", "Changed" and "Fixed" under every release.
+  MD024:
+    siblings_only: true

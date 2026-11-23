@@ -51,6 +51,6 @@ itself via `dlboard.serve.serve_asset` (see `dlboard/plugins/themes/default.css`
 scheme with `:root[data-mantine-color-scheme="dark"]`:
 
 | Variable | What it colors |
-|---|---|
+| --- | --- |
 | `--dl-canvas` | the main area behind cards and panels |
 | `--dl-series-1` … `--dl-series-8` | chart series (runs), via `dlboard.serve.series_color`; keep adjacent slots distinguishable for color-blind viewers |

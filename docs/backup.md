@@ -10,7 +10,7 @@ blobs without the database are unnamed files.
 ## Where your data is
 
 | Deployment | Metadata | Artifacts |
-|---|---|---|
+| --- | --- | --- |
 | `dlboard serve local` | `DLBOARD_SQLITE_LOCATION` (`.dlboard/db.sqlite`) | `DLBOARD_ARTIFACT_STORE_LOCATION` (`.dlboard/artifacts`) |
 | Postgres + filesystem | the Postgres database | `DLBOARD_ARTIFACT_STORE_LOCATION` volume |
 | Postgres + S3 | the Postgres database | the S3 bucket and prefix |

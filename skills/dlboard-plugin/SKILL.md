@@ -28,7 +28,7 @@ python -c "import dlboard.plugins, pathlib; print(pathlib.Path(dlboard.plugins._
 ## 2. Pick the kind
 
 | You want | In `plug` | Read first | Docs |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | A chart type | subclass `ChartType`, then `MyChart.register(allow_override=True)` | `dlboard/plugins/charts/series_band.py` | `plugins/charts.md` |
 | A metadata store | `set_data_store`, with a `SQLStoreBase` subclass | `dlboard/plugins/data_stores/sqlite.py` | `plugins/storage.md` |
 | An artifact (blob) store | `plug_blob_store`, with your own `BlobBackend` (both in `dlboard.plugins.data_stores`) | `dlboard/plugins/data_stores/s3.py` | `plugins/storage.md` |
@@ -44,7 +44,7 @@ A plugin may use what `dlboard.serve`, `dlboard.models` and `dlboard.plugins.dat
 nothing whose name starts with `_`. The built-ins sometimes import private modules. Copy their structure, not those imports. Besides the table above:
 
 | Function | What for |
-|---|---|
+| --- | --- |
 | `serve_asset` | Serve a `.js` or `.css` file kept next to your module, from this app only. |
 | `add_startup_check` | Fail startup when the plugin's configuration is wrong, instead of on the first request. |
 | `register_run_guard` | Refuse a run a request tries to create (a quota, say). |

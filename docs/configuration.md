@@ -17,7 +17,7 @@ version line without a deprecation window.
 ## Server
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_PLUGINS` | | Import path to the `list[PluginProtocol]` to serve, e.g. `myapp.deployment:PLUGINS`. Set by `dlboard serve`; the same as `serve custom --plugins`. |
 | `DLBOARD_URL_PREFIX` | none | Serve under a path prefix (`dlboard` for `https://host/dlboard/`) when a [reverse proxy](reverse-proxy.md) forwards the full path unchanged. |
 | `DLBOARD_TRUSTED_PROXIES` | `0` | How many reverse-proxy hops in front of dlboard to trust `X-Forwarded-*` from. Must be `1` or more behind a proxy, or HTTPS looks like HTTP and secure cookies break. |
@@ -44,7 +44,7 @@ version line without a deprecation window.
 These tune the process that `dlboard serve` runs under (not used by `--debug`).
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_WORKERS_KILL_TIMEOUT_S` | `30` | How long a worker gets to exit after SIGTERM before it is killed. In-flight requests finish, and queued artifact blobs are written and recorded, inside this window. Keep it under your orchestrator's grace period (see [Shutting down](#shutting-down)). |
 | `DLBOARD_WORKERS_MAX_RSS_MB` | `0` (off) | Gracefully restart a worker once its memory passes this many MB. A safety net against slow leaks. |
 | `DLBOARD_BACKPRESSURE` | `0` (Granian decides) | Requests a worker accepts at once; more wait in the socket backlog. |
@@ -61,7 +61,7 @@ The server starts one custodian process beside its workers, which runs every bac
 restarts it if it dies or hangs. Every server sharing a database starts one, and they share the work through the database.
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_CUSTODIAN_ENABLED` | `true` | Whether the server starts a custodian at all. Off, no background task runs on this server (another sharing the database may still run them). |
 | `DLBOARD_CUSTODIAN_TICK_S` | `1.0` | How often the custodian checks on its tasks and on the server that started it, in memory, with no database query. |
 | `DLBOARD_CUSTODIAN_POLL_S` | `5.0` | How often it reads the database for runs asked for. |
@@ -80,7 +80,7 @@ the last N days. A kept run is never deleted by it. These set what a new project
 a changed rule takes effect; the rule itself is set per project, on its page.
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_RETENTION_DEFAULT_MAX_RUNS` | none | A new project keeps this many runs of each `DLBOARD_RETENTION_DEFAULT_UNIT`, and deletes older ones. Unset, with no default age either, a new project keeps every run (or, with a cap set, is held to the first cap). A project with no rule of its own (a new one, or one from before retention) gets this default the next time retention looks for projects (`DLBOARD_RETENTION_INTERVAL_S`), after the grace period like any change. |
 | `DLBOARD_RETENTION_DEFAULT_UNIT` | `experiment` | What `DLBOARD_RETENTION_DEFAULT_MAX_RUNS` counts over: each `experiment`'s runs on their own, or every run of the `project` together. |
 | `DLBOARD_RETENTION_DEFAULT_MAX_AGE_DAYS` | none | A new project keeps runs created in the last this many days, and deletes older ones. Not with `DLBOARD_RETENTION_DEFAULT_MAX_RUNS`. |
@@ -99,7 +99,7 @@ a changed rule takes effect; the rule itself is set per project, on its page.
 ## Logging
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_LOG_LEVEL` | `INFO` | A standard level name: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Governs dlboard's own logs and Granian's; any other library that logs speaks only from `WARNING`. |
 | `DLBOARD_LOG_FORMAT` | `console` | `console` (human-readable) or `json` (one object per line, for a log collector). Applies to everything the server prints, Granian's own lines and Flask's errors included. |
 | `DLBOARD_ACCESS_LOG` | `false` | Log every request's method, path, status and duration. Off since a proxy usually does this already. |
@@ -112,7 +112,7 @@ extra (`pip install 'dlboard[otel]'`; the Docker image has it). The exporters al
 [telemetry.md](telemetry.md) for the metrics and how to point it at Prometheus, Mimir or Loki.
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `OTEL_SERVICE_NAME` | `dlboard` | The standard OpenTelemetry variable: the `service.name` everything is reported under. |
 | `DLBOARD_TELEMETRY_METRICS` | none | Comma-separated exporters to send metrics to: `prometheus` (scrape `/metrics`), `otlp` (push to a collector), or both. |
 | `DLBOARD_TELEMETRY_LOGS` | `false` | Also send every log event over OTLP. Independent of `DLBOARD_LOG_FORMAT`, which still controls what goes to stdout. |
@@ -135,7 +135,7 @@ extra (`pip install 'dlboard[otel]'`; the Docker image has it). The exporters al
 Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [auth.md](plugins/auth.md).
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_SECRET_KEY` | | Signs session cookies. At least 32 characters (`openssl rand -hex 32`) and identical across every worker and replica. |
 | `DLBOARD_SESSION_LIFETIME_HOURS` | `336` | How long a browser stays signed in. |
 | `DLBOARD_RUN_TOKEN_LIFETIME_HOURS` | `168` | How long a [run token](client.md#how-it-works) (`dlboard run-token`) logs to its run before it stops working. |
@@ -153,14 +153,14 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 `LOCAL_STORAGE`, used by `dlboard serve local`. See [storage.md](plugins/storage.md).
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_SQLITE_LOCATION` | `.dlboard/db.sqlite` | The metadata database file. |
 | `DLBOARD_SQLITE_BUSY_TIMEOUT_MS` | `30000` | How long SQLite retries a locked database before failing. |
 
 ## Filesystem artifact storage
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_ARTIFACT_STORE_LOCATION` | `.dlboard/artifacts` | Where artifact blobs live. Uploads are staged in `.staging/` inside it, so give it enough room and keep it on one volume. |
 | `DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE` | `100` | Uploads each worker process may hold not yet written (`0`: no limit). When it holds that many, new uploads wait up to 30 seconds, then get a 503 the client retries, so an unwritable store turns uploads away rather than filling the disk. |
 
@@ -169,7 +169,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 `POSTGRES_STORAGE` and `POSTGRES_S3_STORAGE`. See [storage.md](plugins/storage.md).
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_POSTGRES_HOST` | `localhost` | Host, IP or socket directory; a comma-separated list fails over between hosts. |
 | `DLBOARD_POSTGRES_PORT` | `5432` | |
 | `DLBOARD_POSTGRES_DATABASE` | `dlboard` | |
@@ -199,7 +199,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 `POSTGRES_S3_STORAGE`; needs the `s3` extra. See [storage.md](plugins/storage.md).
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_S3_BUCKET` | required | |
 | `DLBOARD_S3_PREFIX` | `dlboard` | Blobs live under `s3://bucket/prefix/...`. See [backup.md](backup.md) before changing it. |
 | `DLBOARD_S3_ENDPOINT_URL` | AWS | Set for MinIO, VAST or any other S3-compatible store. |
@@ -221,7 +221,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 Read by `dlboard.client.run.init`, `DLBoardLogger` and the REST client in the training process. See [client.md](client.md).
 
 | Variable | Default | |
-|---|---|---|
+| --- | --- | --- |
 | `DLBOARD_API_KEY` | none | An API token (`dlb_...`) from the server's Account page. |
 | `DLBOARD_RUN_ID` | none | Attach to an existing run instead of creating one. |
 | `DLBOARD_USER` | OS login name | The username to attribute a run to on a server that doesn't verify identity. |

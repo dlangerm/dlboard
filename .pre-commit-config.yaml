@@ -65,6 +65,12 @@ repos:
     hooks:
       - id: biome-check
 
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+      # The Markdown's structure (see .markdownlint-cli2.yaml), in a node environment pre-commit provisions itself.
+    rev: v0.24.0
+    hooks:
+      - id: markdownlint-cli2
+
   - repo: https://github.com/jendrikseipp/vulture
     rev: v2.16
     hooks:

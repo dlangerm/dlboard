@@ -49,7 +49,7 @@ them on and takes them off.
 - **Tagging.** Select runs, type a tag in the bar's box (it offers the project's tags as you type) and click **Tag**, or
   **Untag** to take it off them. A script tags its
   run as it launches it (`dlboard.init(..., tags=["baseline"])`, see [client.md](client.md#how-it-works)). A tag is
-  stored in lower case, with its spaces trimmed and runs of them made one, so `Baseline ` and `baseline` are the same tag. It
+  stored in lower case, with its spaces trimmed and runs of them made one, so `"Baseline "` and `baseline` are the same tag. It
   is at most 64 characters long.
 - **Finding runs by tag.** A run's tags follow its name in every run list, and the **Run** column's filter matches them as
   well as the name: `baseline` keeps the runs tagged that. A chart's run picker finds a run by its tag too, and a link to one

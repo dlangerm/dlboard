@@ -9,7 +9,7 @@ Instead, use GitHub's private reporting for this repo: go to the
 go directly to the
 [new advisory form](https://github.com/dlangerm/dlboard/security/advisories/new).
 
-If you'd rather not use GitHub for the report, email dev.onyxzerosoftware@gmail.com instead.
+If you'd rather not use GitHub for the report, email <dev.onyxzerosoftware@gmail.com> instead.
 
 Please include:
 

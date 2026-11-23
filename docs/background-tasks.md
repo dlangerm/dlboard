@@ -56,7 +56,7 @@ heartbeat every `DLBOARD_CUSTODIAN_BEAT_S`: a few statements a minute.
 **What can go wrong, and what it looks like.**
 
 | | |
-|---|---|
+| --- | --- |
 | The custodian crashes or is killed | The server starts another within seconds (`dlboard.custodian.starts` counts it). A claimed item is claimed again once its claim runs out. |
 | A task hangs | The custodian records it and exits; the server starts a new one. The task's `last_outcome` says `hung`. |
 | A task keeps failing | Its error is on the tab, and the task is tried again at its next interval, with each item backing off. `/healthz/custodian` goes red after three intervals. |

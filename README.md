@@ -89,7 +89,6 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 ![A project and its experiments](docs/images/project.png)
 
-
 **Step through artifacts** — View confusion matrices, learning curves, or any images logged during training:
 
 ![A confusion matrix logged at each step, one image per run, with overlays drawn over it that a legend shows and hides](docs/images/image-series.png)
@@ -122,9 +121,11 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 - **Docker** — See [docs/docker.md](docs/docker.md) for building an image with Postgres + S3 support
 - **Custom plugins** — Bring your own storage backend, auth provider, or chart types:
+
   ```bash
   dlboard serve custom --plugins mypackage.deployment:PLUGINS --workers 4
   ```
+
   See [docs/plugins/overview.md](docs/plugins/overview.md) for the plugin protocol.
 - **Multi-user with auth** — Swap in `dlboard.plugins.PASSWORD_AUTH` for user sign-in and API tokens. See [docs/plugins/auth.md](docs/plugins/auth.md).
 
@@ -153,6 +154,7 @@ and [client & logging](docs/client.md) for sending it runs from a training scrip
 Pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and expectations.
 
 The project follows these principles:
+
 - **Code quality over volume** — all PRs are reviewed and understood before merging
 - **AI-generated code is welcome** — but hold it to the same standard as hand-written code
 - **Keep it small** — large features are split into reviewable stacks

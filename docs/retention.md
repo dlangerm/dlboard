@@ -25,7 +25,7 @@ runs says nothing about a number of days.
 Who sets what:
 
 | | Can |
-|---|---|
+| --- | --- |
 | owner | set the project's rule, cancel its pending change |
 | editor | set (or cancel) an experiment's rule |
 | viewer | see the rules and how the project stands |
@@ -117,7 +117,7 @@ itself on the first check that finds nothing left to delete, so a backlog being 
 ## For admins: defaults and caps
 
 | Variable | |
-|---|---|
+| --- | --- |
 | `DLBOARD_RETENTION_DEFAULT_MAX_RUNS`, `DLBOARD_RETENTION_DEFAULT_UNIT` | A new project keeps this many runs of each experiment (or of the project). |
 | `DLBOARD_RETENTION_DEFAULT_MAX_AGE_DAYS` | A new project keeps runs this many days old. Not with the one above. |
 | `DLBOARD_RETENTION_MAX_RUNS`, `DLBOARD_RETENTION_MAX_AGE_DAYS` | The most an owner may keep. With a cap set, an owner can no longer keep every run, nor choose a kind of rule that has no cap; only an admin goes past it, and the rule says that one did. |

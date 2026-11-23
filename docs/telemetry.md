@@ -119,7 +119,7 @@ Every attribute has a small, fixed set of values. The names and attributes are c
 [compatibility promise](compatibility.md).
 
 | Metric | Type | Attributes | |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `http.server.request.duration` | histogram, s | `http.request.method`, `http.route`, `http.response.status_code` | Every request, including ones turned away at sign-in. `http.route` is the route template, not the URL. |
 | `http.server.active_requests` | up/down counter | `http.request.method` | Requests being handled right now. |
 | `dlboard.ingest.metric_values` | counter | | Metric values accepted from training runs. |
@@ -166,7 +166,7 @@ A trace shows where the time of one request went. With `DLBOARD_TELEMETRY_TRACES
 training environment too, a batch your script ships is **one trace** from the shipping process to the database and the
 blob writer:
 
-```
+```text
 dlboard.ship                              (client shipping process, one per batch)
 └─ POST /api/v1/artifacts                 (client: the HTTP request)
    └─ POST /api/v1/artifacts              (server: the Flask request)
@@ -200,7 +200,7 @@ The endpoint, headers and timeouts are the standard `OTEL_EXPORTER_OTLP_*` ones,
 without a collector), both (`otlp,console`), or `none`, which exports nothing while the trace still crosses from client to
 server. Any other exporter is a startup error that lists the ones that work.
 
-#### Over gRPC
+### Over gRPC
 
 Spans, metrics and logs go over **OTLP/HTTP with protobuf** by default, to the collector's HTTP port (usually 4318). For a
 collector or gateway that speaks gRPC (usually port 4317), install the `otel-grpc` extra where each side runs, the

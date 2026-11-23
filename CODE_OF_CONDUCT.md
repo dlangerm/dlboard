@@ -25,7 +25,7 @@ Examples of unacceptable behavior:
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to
-dev.onyxzerosoftware@gmail.com. All complaints will be reviewed and investigated promptly and
+<dev.onyxzerosoftware@gmail.com>. All complaints will be reviewed and investigated promptly and
 fairly, and the project maintainer is obligated to respect the privacy and security of the
 reporter of any incident.
 
@@ -33,4 +33,4 @@ reporter of any incident.
 
 This Code of Conduct is adapted from the
 [Contributor Covenant](https://www.contributor-covenant.org), version 2.1, available at
-https://www.contributor-covenant.org/version/2/1/code_of_conduct.html.
+<https://www.contributor-covenant.org/version/2/1/code_of_conduct.html>.

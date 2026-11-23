@@ -133,6 +133,7 @@ class at all. Lives under `client/`, not `plugins/`, so a client install never n
 just to construct one.
 
 `dlboard/plugins/__init__.py` defines the bundles used for a local deployment:
+
 - `LOCAL_STORAGE` = `[sqlite, filesystem, artifact_purge_worker, trash_retention, lost_runs, retention]` — the metadata DB, artifact blob
   storage, the background tasks that purge what an admin asks to and delete the blobs purges orphan, and the one that
   empties the Trash of what has been in it `DLBOARD_TRASH_RETENTION_DAYS` (see "Background tasks"), and `retention`

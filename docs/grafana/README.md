@@ -3,7 +3,7 @@
 Three dashboards, one per signal dlboard exports:
 
 | File | Data source | What it shows |
-|---|---|---|
+| --- | --- | --- |
 | `dlboard.json` | Prometheus | The server's metrics: requests, ingest from training runs, the artifact pipeline, experiment page reads, runs and sign-ins. Each panel's query uses a metric from [telemetry.md](../telemetry.md), and its description says what a bad value means. |
 | `dlboard-logs.json` | Loki | Error log lines, a "could not start" count, and the server's log lines. |
 | `dlboard-traces.json` | Tempo | Failed traces and the slowest uploads, store commits, page updates and panel reads, found with TraceQL. |
