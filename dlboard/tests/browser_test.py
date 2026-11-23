@@ -294,7 +294,8 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
     # panel) has no content, so it's not reliable either. Mantine's own collapsible region
     # (`value="keep"` on the `AccordionItem`) is: its height/aria-hidden genuinely track
     # open/closed regardless of what's inside.
-    keep_control = page.get_by_role("button", name="keep")
+    # Exactly: once an edit forks the view, its dialog's "Keep" button matches a bare `name="keep"` too (#766).
+    keep_control = page.get_by_role("button", name="keep", exact=True)
     # The accordion's own id is now a pattern-matching dict (one `Accordion` per tab group), so
     # Mantine's derived panel id is that dict's JSON string plus "-panel-<value>" -- not a clean
     # CSS identifier. Read the control's own `aria-controls` (which Mantine sets to that same
