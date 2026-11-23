@@ -3,52 +3,57 @@
 from __future__ import annotations
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from dlboard.models import (
+    ARTIFACT_COLUMN_PREFIX,
+    HISTOGRAM_COLUMN_PREFIX,
+    HPARAM_COLUMN_PREFIX,
     ColumnKind,
     SeriesBandRequest,
     artifact_column,
     artifact_fname_column,
     artifact_keys_in,
+    artifact_logged_column,
     artifact_tags_column,
     column_kind,
     histogram_column,
     hparam_column,
 )
 
-
-@pytest.mark.parametrize(
-    ("name", "prefix", "keys"),
-    [
-        pytest.param("eval/a", False, ["eval/a"], id="exact-key"),
-        pytest.param("eval/", True, ["eval/a", "eval/b"], id="prefix"),
-        pytest.param("", True, ["eval/a", "eval/b", "other"], id="everything"),
-        pytest.param("eval", False, [], id="a-prefix-is-not-a-key"),
-    ],
+# Keys that share their starts and their slashes, so a prefix asks for some of them and not others. A key spelled like
+# a column dlboard makes itself (`artifact__`, `__tags`, ...) is misread: #774.
+_KEYS = st.text(alphabet="ab/_", max_size=5).filter(
+    lambda key: (
+        not key.startswith((HPARAM_COLUMN_PREFIX, ARTIFACT_COLUMN_PREFIX, HISTOGRAM_COLUMN_PREFIX))
+        and not key.endswith(("__tags", "__fname", "__logged"))
+    )
 )
-def test_artifact_keys_in_names_keys_not_their_tag_and_file_name_columns(
-    name: str, *, prefix: bool, keys: list[str]
+
+
+@given(keys=st.lists(_KEYS, unique=True), name=_KEYS, prefix=st.booleans())
+@example(keys=["eval/a", "eval/b", "other"], name="eval", prefix=False)  # a prefix is not a key
+def test_artifact_keys_in_names_the_keys_asked_for_and_not_their_tag_and_file_name_columns(
+    keys: list[str], name: str, *, prefix: bool
 ) -> None:
-    columns = ["run_id", "loss"]
-    for key in ("eval/a", "eval/b", "other"):
+    columns = ["run_id", "loss", *(hparam_column(key) for key in keys)]
+    for key in keys:
         columns += [artifact_column(key), artifact_tags_column(key), artifact_fname_column(key)]
+        columns += [artifact_logged_column(key), histogram_column(key)]
 
-    assert artifact_keys_in(columns, name, prefix=prefix) == keys
+    asked = artifact_keys_in(columns, name, prefix=prefix)
+
+    assert asked == [key for key in keys if (key.startswith(name) if prefix else key == name)]
 
 
-@pytest.mark.parametrize(
-    ("column", "kind"),
-    [
-        (hparam_column("lr"), ColumnKind.HPARAM),
-        (artifact_column("eval/a"), ColumnKind.ARTIFACT),
-        (artifact_tags_column("eval/a"), ColumnKind.ARTIFACT),
-        (histogram_column("grad"), ColumnKind.HISTOGRAM),
-        ("loss", ColumnKind.METRIC),
-        ("run_id", ColumnKind.METRIC),
-    ],
-)
-def test_a_column_kind_is_read_back_from_the_name_its_helper_made(column: str, kind: ColumnKind) -> None:
-    assert column_kind(column) is kind
+@given(_KEYS)
+@example(key="run_id")
+def test_a_column_kind_is_read_back_from_the_name_its_helper_made(key: str) -> None:
+    assert column_kind(hparam_column(key)) is ColumnKind.HPARAM
+    assert column_kind(artifact_column(key)) is column_kind(artifact_tags_column(key)) is ColumnKind.ARTIFACT
+    assert column_kind(histogram_column(key)) is ColumnKind.HISTOGRAM
+    assert column_kind(key) is ColumnKind.METRIC
 
 
 _ACCURACY = [

@@ -7,6 +7,8 @@ from typing import ClassVar
 
 import pandas as pd
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import BaseModel, Field, ValidationError
 
 from dlboard.conftest import make_fake_chart
@@ -210,24 +212,32 @@ def test_a_setting_may_be_layered_if_it_says_how_a_chart_looks_or_is_marked_laye
     }
 
 
-@pytest.mark.parametrize(
-    ("layers", "drawn"),
-    [
-        pytest.param([{"height": 500}], {"height": 500}, id="a-page-sets-what-the-chart-did-not"),
-        pytest.param([{"height": 500}, {"height": 700}], {"height": 700}, id="the-panel-says-last"),
-        pytest.param([{"x_axis": "epoch"}], {"x_axis": "epoch"}, id="a-marked-data-setting"),
-        pytest.param([{"metric": "acc"}], {}, id="never-what-it-draws"),
-        pytest.param([{"height": 10}, {"scale": "cube"}], {}, id="a-value-it-does-not-take-is-left-out"),
-        pytest.param([{"smoothing": 0.5}], {}, id="one-its-type-has-not-waits"),
-    ],
+_TAKES: dict[str, typing.Callable[[SettingValue], bool]] = {
+    "height": lambda value: isinstance(value, int) and value >= 100,  # `_FakeParamsLayered.height`'s ge
+    "scale": lambda value: value in {"linear", "log"},
+    "x_axis": lambda value: isinstance(value, str),  # a marked data setting
+}
+"""What `_FakeParamsLayered` takes of each setting a layer may set: not `metric` (what it draws), nor `smoothing`."""
+_LAYER = st.dictionaries(
+    st.sampled_from(["height", "scale", "x_axis", "metric", "smoothing"]),
+    st.integers(0, 800) | st.sampled_from(["linear", "log", "cube", "epoch"]) | st.floats(0, 1),
 )
+
+
+@given(st.lists(_LAYER, max_size=4))
 def test_a_chart_is_drawn_under_its_page_then_its_panel_settings_never_saved(
-    layers: list[dict[str, SettingValue]], drawn: dict[str, SettingValue]
+    layers: list[dict[str, SettingValue]],
 ) -> None:
-    make_fake_chart("fake-layered", _FakeParamsLayered).register()
+    """Each setting is the last layer's that the chart takes, so a value it does not take leaves the one before."""
+    make_fake_chart("fake-layered", _FakeParamsLayered).register(allow_override=True)
     chart = ChartInstance[typing.Any, typing.Any](
         chart_type="fake-layered", parameters={"metric": "loss", "height": 400}
     )
+    drawn = {
+        name: next(layer[name] for layer in reversed(layers) if name in layer and takes(layer[name]))
+        for name, takes in _TAKES.items()
+        if any(name in layer and takes(layer[name]) for layer in layers)
+    }
 
     assert chart.drawn_with(layers).parameters == {"metric": "loss", "height": 400, **drawn}
     assert (
