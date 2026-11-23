@@ -35,6 +35,18 @@ See [CLAUDE.md](CLAUDE.md) for the fuller set of architecture notes and code-sty
 - If a change is naturally a sequence of dependent steps, submit it as a stack of small PRs rather than one large one -- [`gh stack`](https://github.com/gregoryclarkwitten/gh-stack) is a good way to manage that locally.
 - Add tests for new behavior.
   Favor an end-to-end test that asserts behavior over one that pins implementation details, and don't duplicate coverage another test already provides.
+- Where a contract fits in a sentence, state it as a [Hypothesis](https://hypothesis.readthedocs.io/) property instead of a table of cases.
+  A round trip (a link shows the page it was made from), an invariant (a page of items is its slice of them), or agreement with a brute-force answer (a reduction is what the logged values reduce to) each cover more ground in fewer tests.
+  Draw from small alphabets and small ranges, so the edges come up: a wide `st.integers()` never tries page 2.
+  Keep a table where it is the clearer statement: one example per validation rule, or every member of a set of real things.
+
+### When Hypothesis finds an edge case
+
+The suite draws new examples on every run, so a property can fail on an input it never tried before, in any PR.
+That is a case nobody wrote a test for, not a flaky test.
+Hypothesis saves it to `.hypothesis/` and tries it first on the next run, so CI's recheck of the failed tests fails it again, and `tools/flaky_check.py` files an "Edge case: `<test>`" issue that quotes the input.
+Fix what it found (or, if the behavior is right, the property), then keep the input in the test with `@example(...)`, so every run tries it.
+Locally, `uv run pytest` replays it the same way until it passes.
 
 ## When main is red
 

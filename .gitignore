@@ -20,3 +20,6 @@ screenshot-diffs/
 # Claude Code's own local settings/session state -- developer-machine-local, not project config.
 .claude/
 .dlboard/
+
+# Hypothesis's examples, including the failing ones it replays first (see `dlboard/conftest.py`).
+.hypothesis/

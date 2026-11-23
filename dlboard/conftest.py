@@ -108,11 +108,14 @@ class DurationTier(IntEnum):
         return getattr(pytest.mark, self.name.lower())
 
 
-settings.register_profile("dlboard", derandomize=True, deadline=None, database=None)
+settings.register_profile("dlboard", deadline=None, print_blob=True)
 settings.load_profile("dlboard")
 """
-Hypothesis tries the same examples on every run, like every other test here, so a PR's CI never fails on an example
-its change didn't touch; `--hypothesis-seed` explores others by hand. No deadline: a slow CI runner is not a bug.
+Hypothesis draws new examples on every run, so the suite keeps looking for the case nobody thought of.
+
+One it finds is saved to `.hypothesis/` and tried first by every later run in that checkout: CI's recheck of the failed
+tests replays it, and `tools/flaky_check.py` files it as an edge case, with the example, rather than as a flaky test.
+No deadline: a slow CI runner is not a bug.
 """
 
 DURATIONS_PATH = Path(__file__).parents[1] / "test-durations.json"

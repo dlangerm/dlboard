@@ -191,6 +191,9 @@ Don't make man-in-the-middle functions that only exist to call other functions, 
 
 Pytest should always use functional-style tests, never class-based tests.
 Use parametrized tests instead of multiple test files.
+Where a contract fits in a sentence (a round trip, an invariant, agreement with a brute-force answer), state it as a Hypothesis property rather than a table of cases, drawing from small alphabets and ranges so the edges come up; keep a table where it is the clearer statement (one example per validation rule, or every member of a real set).
+A store property makes an experiment of its own per example (the fixture's store is shared, so it suppresses `HealthCheck.function_scoped_fixture`) and caps `max_examples`.
+An edge case Hypothesis finds is fixed, then kept with `@example(...)`; see "When Hypothesis finds an edge case" in `CONTRIBUTING.md`.
 Keep test files short, orthogonal, and specific, the test should never be harder to maintain than the target module.
 
 Always keep in mind this code is meant to be read and maintained by humans, lines of code and complexity really matter.
