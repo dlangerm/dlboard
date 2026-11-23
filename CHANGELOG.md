@@ -11,6 +11,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-11-23
+
 ### Changed
 
 * **A line chart's *max points* is at least 3.**
