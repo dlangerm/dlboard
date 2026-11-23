@@ -7,11 +7,14 @@ Compiling `CREATE TABLE` against a dialect object is enough to prove the dialect
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import pendulum
 import pytest
 import sqlalchemy as sa
+from hypothesis import example, given
+from hypothesis import strategies as st
 from pydantic import AwareDatetime, BaseModel
 from sqlalchemy.dialects import postgresql, sqlite
 
@@ -19,8 +22,6 @@ from dlboard.serve._backend import _sql
 from dlboard.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 
 if TYPE_CHECKING:
-    from datetime import datetime
-
     from sqlalchemy.engine.interfaces import Dialect
 
 
@@ -148,6 +149,31 @@ def test_utc_datetime_reads_back_aware(stored: datetime | str) -> None:
     assert _sql.UTCDateTime().process_result_value(stored, sqlite.dialect()) == pendulum.datetime(
         2026, 1, 1, tz="UTC"
     )
+
+
+_AWARE = st.datetimes(
+    min_value=datetime(1970, 1, 1),
+    max_value=datetime(2200, 1, 1),
+    timezones=st.timezones(),
+    allow_imaginary=False,  # a local time a clock skipped is no instant
+)
+
+
+@given(_AWARE, _AWARE)
+@example(pendulum.datetime(2000, 1, 1, tz="UTC"), pendulum.datetime(2000, 1, 1, tz="Africa/Addis_Ababa"))
+def test_a_time_stored_on_sqlite_reads_back_as_the_same_instant_and_sorts_as_its_text(
+    one: datetime, other: datetime
+) -> None:
+    """
+    SQLite stores it as text, which a `created_before` compares as text: in any zone, with or without microseconds.
+
+    Instants are compared by their timestamps: an hour a clock repeats is never `==` to a time in another zone.
+    """
+    stored = [str(_sql.UTCDateTime().process_bind_param(when, sqlite.dialect())) for when in (one, other)]
+    read = [_sql.UTCDateTime().process_result_value(text, sqlite.dialect()) for text in stored]
+
+    assert [when.timestamp() for when in read if when is not None] == [one.timestamp(), other.timestamp()]
+    assert (stored[0] < stored[1]) is (one.timestamp() < other.timestamp())
 
 
 def test_insert_leaves_an_unset_id_to_the_database() -> None:

@@ -19,6 +19,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **A progress bar taken away is gone from a run's console.**
   When rich erased a line and drew nothing on it again (Lightning's validation bar, once validation ends), the console kept the bar as it last looked; it keeps the blank line a terminal shows.
   (#746)
+* **A time sent with a zone other than UTC sorts where it belongs on SQLite.**
+  SQLite keeps a time as text and compares it as text, and a time sent through the REST API as `+03:00` was kept as sent, so it sorted three hours late among the rest (`created_before`, the Trash's retention).
+  It is kept in UTC now; times already stored that way stay as they are until they are written again.
+  (#746)
 
 ## [0.20.1] - 2026-11-23
 

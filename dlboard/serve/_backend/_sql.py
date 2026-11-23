@@ -57,9 +57,10 @@ class UTCDateTime(sa.TypeDecorator[datetime]):
     A timezone-aware datetime: `TIMESTAMPTZ` where the database has one, ISO-8601 text on sqlite.
 
     sqlite has no datetime type, and every sqlite database written before this layer existed holds
-    `isoformat()` strings -- which also sort chronologically as plain text -- so sqlite keeps
-    exactly that. Reads are always aware: a string is parsed, a naive value is taken to be UTC.
-    Binds accept either a datetime or an ISO-8601 string (what `model_dump(mode="json")` produces).
+    `isoformat()` strings, so sqlite keeps exactly that, in UTC: text in one zone sorts chronologically as plain text,
+    which is how sqlite compares it (one sent as `+03:00` sorted three hours late). Reads are always aware: a string
+    is parsed, a naive value is taken to be UTC. Binds accept either a datetime or an ISO-8601 string (what
+    `model_dump(mode="json")` produces).
     """
 
     impl = sa.DateTime(timezone=True)
@@ -76,7 +77,7 @@ class UTCDateTime(sa.TypeDecorator[datetime]):
         if value is None:
             return None
         aware = _aware(value)
-        return aware.isoformat() if dialect.name == "sqlite" else aware
+        return aware.astimezone(pendulum.UTC).isoformat() if dialect.name == "sqlite" else aware
 
     @typing.override
     def process_result_value(self, value: datetime | str | None, dialect: Dialect) -> datetime | None:

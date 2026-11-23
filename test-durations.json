@@ -1744,6 +1744,7 @@
   "dlboard/serve/_backend/tests/soft_delete_test.py::test_the_trash_lists_runs_deleted_together_newest_id_first_and_pages_through_them[sqlite]": 0.19594311900436878,
   "dlboard/serve/_backend/tests/sql_functions_test.py::test_a_packed_column_passes_a_null_through[column0]": 0.001089566998416558,
   "dlboard/serve/_backend/tests/sql_functions_test.py::test_a_packed_column_passes_a_null_through[column1]": 0.0009643439952924382,
+  "dlboard/serve/_backend/tests/sql_functions_test.py::test_a_time_stored_on_sqlite_reads_back_as_the_same_instant_and_sorts_as_its_text": 0.6453467540050042,
   "dlboard/serve/_backend/tests/sql_functions_test.py::test_column_type_unsupported_annotation_raises": 0.0009313119990110863,
   "dlboard/serve/_backend/tests/sql_functions_test.py::test_construct_builds_model_from_row_by_column_name": 0.0009152380007435568,
   "dlboard/serve/_backend/tests/sql_functions_test.py::test_insert_leaves_an_unset_id_to_the_database": 0.0016535499999008607,
