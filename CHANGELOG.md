@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-22
+
 ### Added
 
 * **The console chart wraps a long line.** A line wider than the chart wraps onto as many rows as it takes, and wraps
@@ -41,7 +43,6 @@ pulls that section's body into the GitHub release notes and publishes both distr
   project" item of its ⋯ menu that nobody found.
 * **The console chart's run picker lists the newest run first, in its colours.** The runs are in the Runs table's
   order, each drawn with the colour and dash it has on the page's other charts, and the newest is the one opened.
-
 * **An edit that makes a view of your own asks whether to keep it.** Editing a page that isn't yours (the shared page,
   or someone else's view) still saves the change to a new view of your own, and now says so in a dialog, with **Keep my
   view** or **Undo**, which deletes the new view and goes back to the one you were on, instead of a toast. Even hiding
