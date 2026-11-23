@@ -11,6 +11,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Changed
+
+* **A line chart's *max points* is at least 3.**
+  Thinning a run's line keeps its first point, its last and one between at the least, so fewer (2, 0, or a negative number) left the line unthinned, every point drawn, the opposite of what it asked for; the editor now refuses them.
+  (#746)
+
 ### Fixed
 
 * **A panel or chart filter typed in capitals finds a name with a µ in it.**

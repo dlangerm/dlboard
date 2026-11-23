@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import itertools
 import typing
 
 import numpy as np
 import pandas as pd
 import pytest
 from dash import dcc, html
+from hypothesis import given
+from hypothesis import strategies as st
 
 from dlboard.conftest import props
 from dlboard.models import (
@@ -72,36 +75,56 @@ def _values(figure: dict[str, typing.Any], trace: int, field: str) -> np.ndarray
     return values
 
 
-def test_regrid_conserves_counts_and_is_exact_where_the_edges_line_up() -> None:
-    histogram = _histogram()
-
-    assert regrid(histogram, np.array([0.0, 1.0, 2.0, 4.0])).tolist() == [10, 20, 0]
-    assert regrid(histogram, np.array([-5.0, 0.5, 1.5, 2.0, 9.0])).tolist() == pytest.approx([5, 15, 10, 0])
-
-
-def test_the_common_edges_of_histograms_on_one_lattice_add_nothing() -> None:
-    coarse, fine = _histogram(), Histogram(edges=[1.0, 2.0, 4.0], counts=[1, 1])
-
-    assert common_edges([coarse, fine], max_rows=128).tolist() == [0.0, 1.0, 2.0, 4.0]
+@st.composite
+def _histograms(draw: st.DrawFn) -> Histogram:
+    """Edges on a coarse lattice (so histograms share some), and counts with empty buckets among them."""
+    edges = draw(st.lists(st.integers(-20, 20), min_size=2, max_size=8, unique=True).map(sorted))
+    counts = draw(st.lists(st.integers(0, 50) | st.just(0), min_size=len(edges) - 1, max_size=len(edges) - 1))
+    return Histogram(edges=[float(edge) for edge in edges], counts=counts)
 
 
-def test_the_common_edges_are_capped_by_merging_neighbours() -> None:
-    wide = Histogram(edges=list(map(float, range(101))), counts=[1] * 100)
+@given(_histograms(), st.lists(st.floats(-25, 25), max_size=6))
+def test_regrid_conserves_counts_and_is_exact_where_the_edges_line_up(
+    histogram: Histogram, cuts: list[float]
+) -> None:
+    """Onto any edges that reach both of its ends; onto its own edges and more, each new bucket is a part of an old."""
+    target = np.unique([*cuts, histogram.edges[0], histogram.edges[-1]])
+    refined = np.unique([*target, *histogram.edges])
 
-    edges = common_edges([wide], max_rows=10)
+    assert regrid(histogram, target).sum() == pytest.approx(sum(histogram.counts))
+    assert regrid(histogram, np.asarray(histogram.edges)).tolist() == pytest.approx(histogram.counts)
+    regridded, lows = regrid(histogram, refined), refined[:-1]
+    assert [
+        regridded[(lows >= low) & (lows < high)].sum() for low, high in itertools.pairwise(histogram.edges)
+    ] == pytest.approx(histogram.counts)
 
-    assert len(edges) - 1 <= 10
-    assert (edges[0], edges[-1]) == (0.0, 100.0)
+
+@given(st.lists(_histograms(), min_size=1, max_size=4), st.integers(2, 40))
+def test_the_common_edges_are_every_histograms_edges_unless_capped_by_merging_neighbours(
+    histograms: list[Histogram], max_rows: int
+) -> None:
+    """Histograms on one lattice add nothing; too many edges are merged down to `max_rows`, its ends kept."""
+    every = sorted({edge for histogram in histograms for edge in histogram.edges})
+
+    edges = common_edges(histograms, max_rows=max_rows).tolist()
+
+    assert (edges[0], edges[-1]) == (every[0], every[-1])
+    assert len(edges) - 1 <= max_rows
+    assert edges == every or len(every) - 1 > max_rows
 
 
-def test_spread_reads_the_extremes_and_percentiles_off_the_buckets() -> None:
-    histogram = Histogram(edges=[0.0, 1.0, 2.0, 3.0, 4.0], counts=[0, 10, 10, 0])
+@given(_histograms())
+def test_spread_reads_the_extremes_and_percentiles_off_the_buckets(histogram: Histogram) -> None:
+    """In order, from the low edge of the first bucket with anything in it to the high edge of the last."""
+    filled = [at for at, count in enumerate(histogram.counts) if count]
 
     low, p16, median, p84, high = spread(histogram, (0.16, 0.5, 0.84))
 
-    assert (low, median, high) == (1.0, 2.0, 3.0)
-    assert (p16, p84) == pytest.approx((1.32, 2.68))
-    assert np.isnan(spread(Histogram(edges=[0.0, 1.0], counts=[0]), (0.16, 0.5, 0.84))).all()
+    if not filled:
+        assert np.isnan([low, p16, median, p84, high]).all()
+    else:
+        assert (low, high) == (histogram.edges[filled[0]], histogram.edges[filled[-1] + 1])
+        assert low <= p16 <= median <= p84 <= high
 
 
 @pytest.mark.parametrize("display", list(HistogramDisplay))

@@ -6,12 +6,14 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 import pendulum
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, Clock, StoreBackend
 from dlboard.models import RunStatus
 from dlboard.plugins.retention._candidates import Candidates, Rules
-from dlboard.plugins.retention._rules import RetentionRule, RetentionUnit, RunAge, RunCount, Unlimited
+from dlboard.plugins.retention._rules import RetentionRule, RetentionUnit, RunAge, RunCount
 from dlboard.plugins.retention._settings import RetentionSettings
 
 if TYPE_CHECKING:
@@ -41,6 +43,10 @@ class _Project(NamedTuple):
 
 @pytest.fixture
 def project(store: SQLStoreBase[Any]) -> _Project:
+    return _new_project(store)
+
+
+def _new_project(store: SQLStoreBase[Any]) -> _Project:
     project_id = store.create_project(models.NewProject(name="p", description="")).id
     first, second = (
         store.create_experiment(models.NewExperiment(project_id=project_id)).id for _ in range(2)
@@ -75,13 +81,52 @@ def _find(
     )
 
 
-@pytest.mark.parametrize(("logged", "deleted"), [(5, 0), (6, 3)], ids=["within the slack", "past it"])
-def test_a_count_of_each_experiment_acts_past_its_slack_and_deletes_down_to_the_count(
-    store: SQLStoreBase[Any], project: _Project, logged: int, deleted: int
+@given(
+    logged=st.tuples(st.integers(0, 9), st.integers(0, 9)),
+    max_runs=st.integers(1, 5),
+    own=st.none() | st.integers(1, 6),
+    kept=st.sets(st.integers(0, 17), max_size=4),
+    limit=st.integers(1, 20),
+)
+@settings(max_examples=30, suppress_health_check=[HealthCheck.function_scoped_fixture])  # a project each
+def test_a_count_of_each_experiment_acts_past_its_slack_and_deletes_its_oldest_down_to_the_count(  # noqa: PLR0913
+    store: SQLStoreBase[Any],
+    admin: models.User,
+    logged: tuple[int, int],
+    max_runs: int,
+    own: int | None,
+    kept: set[int],
+    limit: int,
 ) -> None:
-    runs = project.log(0, logged)
-    project.log(1, 3)
-    assert _find(store, project, RunCount(max_runs=3, unit=RetentionUnit.EXPERIMENT)) == runs[:deleted]
+    """
+    A kept run is neither counted nor deleted, and the first experiment's `own` count applies only if it is stricter.
+
+    The runs found are the oldest first, at most `limit` of them.
+    """
+    project = _new_project(store)
+    runs = [project.log(experiment, count) for experiment, count in enumerate(logged)]
+    keeping = frozenset(run for at, run in enumerate(runs[0] + runs[1]) if at in kept)
+    if keeping:
+        store.keep_runs(keeping, admin)
+    counts = [max_runs if own is None else min(own, max_runs), max_runs]
+    live = [[run for run in experiment if run not in keeping] for experiment in runs]
+    overdue = [
+        run
+        for count, experiment in zip(counts, live, strict=True)
+        if len(experiment) > count + 2  # the slack
+        for run in experiment[: len(experiment) - count]
+    ]
+
+    found = Candidates(store, RetentionSettings(), pendulum.now("UTC")).find(
+        project.id,
+        Rules(
+            project=RunCount(max_runs=max_runs),
+            experiments={} if own is None else {project.experiments[0]: RunCount(max_runs=own)},
+        ),
+        limit=limit,
+    )
+
+    assert found == sorted(overdue)[:limit]
 
 
 def test_a_count_of_the_project_keeps_its_newest_runs_whichever_experiment_they_are_of(
@@ -90,16 +135,6 @@ def test_a_count_of_the_project_keeps_its_newest_runs_whichever_experiment_they_
     older, newer = project.log(0, 3), project.log(1, 3)
     assert _find(store, project, RunCount(max_runs=3, unit=RetentionUnit.PROJECT)) == older
     assert newer
-
-
-def test_a_kept_run_is_neither_counted_nor_deleted(
-    store: SQLStoreBase[Any], project: _Project, admin: models.User
-) -> None:
-    runs = project.log(0, 7)
-    store.keep_runs(frozenset(runs[:2]), admin)
-    assert _find(store, project, RunCount(max_runs=2)) == runs[2:5]
-    store.keep_runs(frozenset(runs[2:3]), admin)
-    assert _find(store, project, RunCount(max_runs=2)) == []
 
 
 @pytest.mark.parametrize(("days_ago", "deleted"), [(0, False), (8, True)], ids=["running", "abandoned"])
@@ -119,21 +154,6 @@ def test_an_age_acts_past_its_slack_and_deletes_every_run_older_than_it(
 ) -> None:
     runs = {age: project.log(0, 1, days_ago=age)[0] for age in ages}
     assert _find(store, project, RunAge(max_age_days=5)) == [runs[age] for age in deleted]
-
-
-def test_an_experiment_held_to_a_stricter_rule_deletes_down_to_its_own(
-    store: SQLStoreBase[Any], project: _Project
-) -> None:
-    strict, lax = project.log(0, 6), project.log(1, 6)
-    assert _find(store, project, RunCount(max_runs=10), e0=RunCount(max_runs=3)) == strict[:3]
-    assert lax
-
-
-def test_an_experiments_rule_that_keeps_more_than_its_project_is_not_applied(
-    store: SQLStoreBase[Any], project: _Project
-) -> None:
-    runs = project.log(0, 6)
-    assert _find(store, project, RunCount(max_runs=3), e0=Unlimited()) == runs[:3]
 
 
 def test_candidates_are_the_oldest_first_at_most_the_limit_and_never_of_a_deleted_experiment(

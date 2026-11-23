@@ -35,7 +35,7 @@ from dlboard.plugins.charts._axis_label import (
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._empty_chart import nothing_logged, nothing_to_place
 from dlboard.plugins.charts._run_groups import grouped_traces, groups_of
-from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
+from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, MIN_MAX_POINTS, shared_sample_grid
 from dlboard.plugins.charts._themed_figure import plotly_layout, register_themed_graphs, themed_graph
 from dlboard.serve import AssetKind, series_color, series_dash, serve_asset
 
@@ -236,7 +236,7 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_do
     """Overall chart width in px. Leave blank to size it automatically from height."""
     sample: typing.Annotated[bool, ADVANCED_SECTION] = Field(default=True)
     """Downsample each run's series (LTTB) so huge series stay smooth to render."""
-    max_points: typing.Annotated[int, ADVANCED_SECTION] = Field(default=DEFAULT_MAX_POINTS)
+    max_points: typing.Annotated[int, ADVANCED_SECTION] = Field(default=DEFAULT_MAX_POINTS, ge=MIN_MAX_POINTS)
     """Target point count per run when sample is enabled."""
     max_axis_label_chars: typing.Annotated[
         MaxAxisLabelChars, DISPLAY_SECTION, Field(title="Max axis label characters")

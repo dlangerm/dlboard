@@ -6,13 +6,14 @@ import numpy as np
 import pandas as pd
 
 DEFAULT_MAX_POINTS = 500
-_MIN_LTTB_THRESHOLD = 3
+MIN_MAX_POINTS = 3
+"""The fewest points LTTB thins to (the first, the last, and one between): a line chart takes no fewer (`max_points`)."""
 
 
 def _lttb_indices(x: np.ndarray, y: np.ndarray, threshold: int) -> np.ndarray:
     """Largest-Triangle-Three-Buckets: pick `threshold` indices that best preserve the series' shape."""
     n = len(x)
-    if threshold >= n or threshold < _MIN_LTTB_THRESHOLD:
+    if threshold >= n or threshold < MIN_MAX_POINTS:
         return np.arange(n)
 
     bucket_size = (n - 2) / (threshold - 2)

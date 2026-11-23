@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from hypothesis.extra import numpy as hnp
 from pydantic import ValidationError
 
 from dlboard.conftest import props
@@ -21,7 +22,12 @@ from dlboard.plugins.charts._axis_label import (
     MIN_MAX_AXIS_LABEL_CHARS,
     VALUE_AXIS_WIDTH,
 )
-from dlboard.plugins.charts._sampling import downsample_grouped, downsample_series, shared_sample_grid
+from dlboard.plugins.charts._sampling import (
+    MIN_MAX_POINTS,
+    downsample_grouped,
+    downsample_series,
+    shared_sample_grid,
+)
 from dlboard.plugins.charts.bar_chart import BarChart, BarChartSettings
 from dlboard.plugins.charts.line_chart import (
     _TICK_FORMATTER,
@@ -47,59 +53,51 @@ def _props(chart: dmc.Stack) -> dict[str, Any]:
     return props(_plot(chart))
 
 
-def _series_df(n: int) -> pd.DataFrame:
-    return pd.DataFrame({"x": range(n), "y": np.sin(np.linspace(0, 10, n))})
+_YS = st.floats(-1e6, 1e6)
 
 
-@pytest.mark.parametrize("n", [10, 50])
-def test_downsample_series_is_noop_below_threshold(n: int) -> None:
-    df = _series_df(n)
-    assert len(downsample_series(df, "x", "y", max_points=100)) == n
+@given(ys=st.lists(_YS, min_size=1, max_size=200), max_points=st.integers(MIN_MAX_POINTS, 60))
+def test_downsample_series_keeps_max_points_of_its_rows_in_order_with_both_ends(
+    ys: list[float], max_points: int
+) -> None:
+    """A series within the budget is kept whole."""
+    df = pd.DataFrame({"x": range(len(ys)), "y": ys})
 
-
-@pytest.mark.parametrize("max_points", [10, 50, 100])
-def test_downsample_series_bounds_and_preserves_endpoints(max_points: int) -> None:
-    df = _series_df(1000)
     out = downsample_series(df, "x", "y", max_points=max_points)
-    assert len(out) == max_points
-    assert out["x"].iloc[0] == df["x"].iloc[0]
-    assert out["x"].iloc[-1] == df["x"].iloc[-1]
+
+    assert len(out) == min(len(df), max_points)
+    assert (out["x"].iloc[0], out["x"].iloc[-1]) == (0, len(df) - 1)
     assert out["x"].is_monotonic_increasing
+    pd.testing.assert_frame_equal(out, df.loc[out.index])
 
 
-def test_downsample_grouped_downsamples_each_group_independently() -> None:
-    df = pd.concat([_series_df(1000).assign(run_id=1), _series_df(50).assign(run_id=2)], ignore_index=True)
-    out = downsample_grouped(df, "x", "y", "run_id", max_points=100)
-    counts = out.groupby("run_id").size()
-    assert counts[1] == 100
-    assert counts[2] == 50  # below threshold, untouched
+@given(sizes=st.lists(st.integers(1, 80), max_size=3), max_points=st.integers(MIN_MAX_POINTS, 30))
+def test_downsample_grouped_downsamples_each_group_on_its_own(sizes: list[int], max_points: int) -> None:
+    df = pd.DataFrame(
+        [
+            {"run_id": run, "x": x, "y": float((x * 7919 + run) % 101)}
+            for run, size in enumerate(sizes)
+            for x in range(size)
+        ],
+        columns=["run_id", "x", "y"],
+    )
+
+    out = downsample_grouped(df, "x", "y", "run_id", max_points=max_points)
+
+    assert {run: list(group["x"]) for run, group in out.groupby("run_id")} == {
+        run: list(downsample_series(group, "x", "y", max_points)["x"]) for run, group in df.groupby("run_id")
+    }
+
+
+def test_a_line_chart_samples_to_no_fewer_points_than_lttb_can_pick() -> None:
+    """Fewer than the first, the last and one between left a series unsampled, the opposite of what it asked for."""
+    with pytest.raises(ValidationError):
+        LineChartSettings(column="loss", x_axis="step", max_points=MIN_MAX_POINTS - 1)
 
 
 def test_downsample_grouped_empty_df_is_noop() -> None:
     df = pd.DataFrame(columns=["x", "y", "run_id"])
     assert downsample_grouped(df, "x", "y", "run_id", max_points=10).empty
-
-
-def test_shared_sample_grid_gives_every_value_column_the_same_x_values() -> None:
-    """Two metrics with unrelated shapes must still pick the same x-values, so charts plotting
-    either one -- synced by x-value -- always have a point at the same place.
-    """
-    n = 1000
-    x = np.arange(n)
-    df = pd.DataFrame(
-        {
-            "x": x,
-            "run_id": 1,
-            "loss": np.sin(np.linspace(0, 10, n)),
-            "acc": np.cos(np.linspace(0, 30, n)),  # different shape/frequency than "loss"
-        }
-    )
-    grid = shared_sample_grid(df, x_col="x", group_col="run_id", value_cols=["loss", "acc"], max_points=50)
-
-    loss_only = shared_sample_grid(df, x_col="x", group_col="run_id", value_cols=["loss"], max_points=50)
-    acc_only = shared_sample_grid(df, x_col="x", group_col="run_id", value_cols=["acc"], max_points=50)
-    assert set(loss_only["x"]) <= set(grid["x"])
-    assert set(acc_only["x"]) <= set(grid["x"])
 
 
 def test_shared_sample_grid_empty_df_is_noop() -> None:
@@ -123,32 +121,37 @@ def _per_column_shared_sample_grid(
     return pd.concat(parts, ignore_index=True) if parts else df.loc[:, [group_col, x_col]].drop_duplicates()
 
 
-@pytest.mark.parametrize("x_kind", ["int", "datetime"])
-@pytest.mark.parametrize("max_points", [5, 40, 500])
-def test_shared_sample_grid_picks_what_sampling_each_column_on_its_own_would(
-    x_kind: Literal["int", "datetime"], max_points: int
-) -> None:
-    n = 300
-    rng = np.random.default_rng(0)
-    x = pd.date_range("2026-01-01", periods=n, freq="s") if x_kind == "datetime" else np.arange(n)
-    frames = [
-        pd.DataFrame(
-            {
-                "x": x,
-                "run_id": run_id,
-                "dense": rng.normal(size=n).cumsum(),
-                "short": np.where(np.arange(n) % 50 == 0, rng.normal(size=n), np.nan),  # fits the budget
-                "sparse": np.where(rng.random(n) < 0.4, rng.normal(size=n), np.nan),
-                "never": np.nan,
-            }
+@st.composite
+def _runs_of_columns(draw: st.DrawFn) -> pd.DataFrame:
+    """A run or two of values in three columns, each logged at some steps: densely, sparsely, or never."""
+    frames: list[pd.DataFrame] = []
+    for run_id in range(draw(st.integers(1, 2))):
+        n = draw(st.integers(1, 120))
+        frames.append(
+            pd.DataFrame(
+                {
+                    "x": np.arange(n),
+                    "run_id": run_id,
+                    **{
+                        col: draw(hnp.arrays(float, n, elements=st.one_of(_YS, st.just(np.nan))))
+                        for col in ("a", "b", "c")
+                    },
+                }
+            )
         )
-        for run_id in (1, 2)
-    ]
     df = pd.concat(frames, ignore_index=True)
-    value_cols = ["dense", "short", "sparse", "never"]
+    if draw(st.booleans()):  # a datetime x-axis
+        df["x"] = pd.Timestamp("2026-01-01") + pd.to_timedelta(df["x"], unit="s")
+    return df
 
-    actual = shared_sample_grid(df, "x", "run_id", value_cols, max_points)
-    expected = _per_column_shared_sample_grid(df, "x", "run_id", value_cols, max_points)
+
+@given(df=_runs_of_columns(), max_points=st.integers(MIN_MAX_POINTS, 60))
+def test_shared_sample_grid_picks_what_sampling_each_column_on_its_own_would(
+    df: pd.DataFrame, max_points: int
+) -> None:
+    """So charts of different metrics, synced by x-value, always have a point at the same place."""
+    actual = shared_sample_grid(df, "x", "run_id", ["a", "b", "c"], max_points)
+    expected = _per_column_shared_sample_grid(df, "x", "run_id", ["a", "b", "c"], max_points)
 
     pd.testing.assert_frame_equal(actual, expected)
 
