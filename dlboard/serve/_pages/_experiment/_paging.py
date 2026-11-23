@@ -60,8 +60,10 @@ def fuzzy_match(query: str, text: str) -> bool:
 
     So `"vl loss"` matches `"val/loss"` and `"train_loss"` alike; an empty query matches everything.
     """
-    haystack = text.lower()
-    return all(_is_subsequence(token, haystack) for token in query.lower().split())
+    haystack = (
+        text.casefold()
+    )  # not `lower()`: `"µ".upper().lower()` is not `"µ"`, so a capital typed missed it
+    return all(_is_subsequence(token, haystack) for token in query.casefold().split())
 
 
 def _is_subsequence(needle: str, haystack: str) -> bool:

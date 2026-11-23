@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+from itertools import chain
 from typing import Any
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts.image_series import ImageChart
@@ -23,33 +27,39 @@ def _panels(count: int, tab: str = "") -> list[PanelInstance[Any, Any]]:
     return [PanelInstance[Any, Any](name=f"panel {i}", tab=tab) for i in range(count)]
 
 
-@pytest.mark.parametrize(
-    ("query", "text", "expected"),
-    [
-        ("", "anything", True),
-        ("vl", "val/loss", True),
-        ("LOSS", "train_loss", True),
-        ("vl loss", "val/loss", True),
-        ("ssol", "loss", False),
-        ("loss acc", "val/loss", False),
-    ],
-)
-def test_fuzzy_match(query: str, text: str, *, expected: bool) -> None:
-    assert paging.fuzzy_match(query, text) is expected
+@given(
+    st.text() | st.text(alphabet="aAµßİ ", max_size=4), st.data()
+)  # letters whose case is not one letter's
+def test_a_filter_matches_a_name_each_of_its_words_is_drawn_from_in_order(
+    text: str, data: st.DataObject
+) -> None:
+    """`vl loss` matches `val/loss`, in any case; an empty filter matches everything."""
+    kept = st.lists(st.booleans(), min_size=len(text), max_size=len(text))  # the characters a word keeps
+    words = [
+        "".join(char for char, keep in zip(text, mask, strict=True) if keep)
+        for mask in data.draw(st.lists(kept, max_size=3))
+    ]
+
+    assert paging.fuzzy_match(" ".join(words).upper(), text)
 
 
-@pytest.mark.parametrize(
-    ("number", "expected_items", "expected_number"),
-    [(1, [0, 1, 2], 1), (2, [3, 4, 5], 2), (3, [6], 3), (0, [0, 1, 2], 1), (99, [6], 3)],
-)
-def test_page_slice_clamps_into_range(number: int, expected_items: list[int], expected_number: int) -> None:
-    page = paging.page_slice(list(range(7)), number, 3)
-    assert (page.items, page.number, page.total) == (expected_items, expected_number, 3)
+@pytest.mark.parametrize(("query", "text"), [("ssol", "loss"), ("loss acc", "val/loss")])
+def test_a_filter_matches_no_name_missing_a_word_or_its_order(query: str, text: str) -> None:
+    assert not paging.fuzzy_match(query, text)
 
 
-def test_empty_sequence_is_one_empty_page() -> None:
-    page = paging.page_slice(list[int](), 5, 3)
-    assert (page.items, page.number, page.total) == ([], 1, 1)
+@given(st.lists(st.integers(), max_size=30), st.integers(), st.integers(min_value=1, max_value=10))
+def test_a_page_is_its_slice_of_the_items_and_a_number_out_of_range_the_nearest_page(
+    items: list[int], number: int, per_page: int
+) -> None:
+    page = paging.page_slice(items, number, per_page)
+    pages = [paging.page_slice(items, at, per_page).items for at in range(1, page.total + 1)]
+
+    assert page.number == sorted((1, number, page.total))[1]
+    assert page.items == pages[page.number - 1]
+    assert list(chain.from_iterable(pages)) == items
+    assert all(len(full) == per_page for full in pages[:-1])
+    assert pages[-1] or not items  # only nothing at all is one empty page
 
 
 def test_visible_panels_filters_the_tab_before_slicing() -> None:
@@ -83,22 +93,43 @@ def test_chart_search_keys_cover_metrics_and_artifacts_but_not_axes() -> None:
     assert "preview" in paging.chart_search_keys(image)
 
 
-@pytest.mark.parametrize(
-    "raw",
-    [
-        {},
-        {"panels_q": "loss", "panels_page": "3"},
-        {"charts": '{"p": {"q": "acc", "page": 2}}'},
-        {"panels_page": "2", "charts": '{"p": {"page": 4}}', "panels_q": "x"},
-        {"tab": "Images", "open": '["a", "b"]'},
-        {"open": "[]"},
-        {"run": "17", "panels_q": "loss"},
-    ],
+def _from_url(query: dict[str, str]) -> paging.Paging:
+    return paging.Paging.from_request({name: value for name, value in query.items() if value}, None)
+
+
+# Few characters and small numbers, so the edges come up: a space, what a URL or JSON quotes, page 1 and 2.
+_NAMES = st.text(alphabet=' a&=/"é', max_size=4)
+_PAGES = st.integers(min_value=1, max_value=3)
+
+
+@given(
+    st.builds(
+        paging.Paging,
+        panel_q=_NAMES,
+        panel_page=_PAGES,
+        charts=st.dictionaries(_NAMES, st.builds(paging.ChartPaging, q=_NAMES, page=_PAGES)),
+        tab=st.none() | _NAMES.filter(bool),  # `""`, the ungrouped tab, is always the first: the same as none
+        open_panels=st.none() | st.lists(_NAMES).map(tuple),
+        focus=st.none() | _PAGES,
+        hidden=st.frozensets(st.integers()),
+    )
 )
-def test_query_round_trips(raw: dict[str, str]) -> None:
-    parsed = paging.Paging.from_request(raw, None)
-    url = {name: value for name, value in parsed.query.items() if value}
-    assert paging.Paging.from_request(url, None) == parsed
+def test_a_link_shows_what_its_page_showed(shown: paging.Paging) -> None:
+    assert _from_url(shown.query) == shown
+
+
+_JSON = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.floats() | st.text(max_size=4),
+    lambda inner: st.lists(inner, max_size=3) | st.dictionaries(st.text(max_size=4), inner, max_size=3),
+    max_leaves=8,
+).map(json.dumps)
+
+
+@given(st.dictionaries(st.sampled_from(sorted(paging.Paging().query)), st.text() | _JSON))
+def test_any_link_shows_a_page_whose_own_link_shows_it_again(query: dict[str, str]) -> None:
+    shown = _from_url(query)
+
+    assert _from_url(shown.query) == shown
 
 
 @pytest.mark.parametrize(

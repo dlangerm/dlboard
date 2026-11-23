@@ -11,6 +11,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Fixed
+
+* **A panel or chart filter typed in capitals finds a name with a µ in it.**
+  The filter compared lowercased text, and `µ` capitalized and lowercased again is the Greek `μ`, so `µS/STEP` did not find `µs/step`; it compares case-folded text now, which also lets `STRASSE` find `straße`.
+  (#746)
+
 ## [0.20.1] - 2026-11-23
 
 ### Changed

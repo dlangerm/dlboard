@@ -9,6 +9,8 @@ import dash_mantine_components as dmc
 import numpy as np
 import pandas as pd
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from dlboard.conftest import props
@@ -221,38 +223,34 @@ def test_line_chart_series_label_uses_the_run_name_column_when_present() -> None
     assert labels == {"1": "uptight-yak", "2": "abstract-goldfish"}
 
 
-@pytest.mark.parametrize(
-    ("column", "has_value_at"),
-    [("2", {0, 4, 8}), ("2__y", set(range(9)))],
-    ids=["plotted-line-only-where-logged", "tooltip-nearest-value-within-the-runs-range"],
-)
-def test_line_chart_never_shows_a_run_where_it_did_not_log(column: str, has_value_at: set[int]) -> None:
+@given(st.dictionaries(st.integers(1, 4), st.sets(st.integers(0, 20), min_size=1), min_size=1))
+def test_line_chart_never_shows_a_run_where_it_did_not_log(logged: dict[int, set[int]]) -> None:
     """
-    Run 2 logs steps 0, 4 and 8 of run 1's 0-11. Its line is drawn only through what it logged (not
-    as a staircase of nearest values), and stops at step 8 rather than running flat to 11; the
-    tooltip's nearest value covers its own range and nothing past it.
+    A run's line goes only through the steps it logged (not a staircase of nearest values), and stops at its last.
+
+    Its tooltip, at any step of its own range, names its nearest logged value (the earlier on a tie) and none past it.
+    Each logged value is `10 * step + run`, so a value says where it came from.
     """
-    df = pd.concat(
-        [_metrics_df(12, n_runs=1), _metrics_df(9, n_runs=2).query("run_id == 2 and step % 4 == 0")]
+    df = pd.DataFrame(
+        [
+            {"run_id": run, "step": step, "loss": 10.0 * step + run}
+            for run, steps in logged.items()
+            for step in steps
+        ]
     )
     chart = LineChart.render(LineChartSettings(column="loss", x_axis="step", sample=False), df)
 
-    values: dict[int, float] = {row["step"]: row[column] for row in _props(chart)["data"]}
-    assert {step for step, value in values.items() if not np.isnan(value)} == has_value_at
-
-
-def test_line_chart_tooltip_takes_a_runs_nearest_logged_value_and_the_earlier_on_a_tie() -> None:
-    """Run 2 logs steps 0, 4 and 8: at step 2 it is as near to 0 as to 4, and the tooltip names step 0's value."""
-    df = pd.concat(
-        [_metrics_df(12, n_runs=1), _metrics_df(9, n_runs=2).query("run_id == 2 and step % 4 == 0")]
-    )
-    chart = LineChart.render(LineChartSettings(column="loss", x_axis="step", sample=False), df)
-
-    rows: dict[int, dict[str, float]] = {row["step"]: row for row in _props(chart)["data"]}
-    assert [rows[step]["2__x"] for step in range(9)] == [0, 0, 0, 4, 4, 4, 4, 8, 8]
-    run_2 = df.query("run_id == 2")
-    logged = dict(zip(run_2["step"].astype(int), run_2["loss"].astype(float), strict=True))
-    assert all(rows[step]["2__y"] == logged[int(rows[step]["2__x"])] for step in range(9))
+    rows: list[dict[str, float]] = _props(chart)["data"]
+    assert [row["step"] for row in rows] == sorted(set().union(*logged.values()))
+    for row, (run, steps) in ((row, run_steps) for row in rows for run_steps in logged.items()):
+        step = row["step"]
+        nearest = min(steps, key=lambda at: (abs(at - step), at))
+        line, tooltip, tooltip_step = row[str(run)], row[f"{run}__y"], row[f"{run}__x"]
+        assert line == 10 * step + run if step in steps else np.isnan(line)
+        if min(steps) <= step <= max(steps):
+            assert (tooltip, tooltip_step) == (10 * nearest + run, nearest)
+        else:
+            assert np.isnan([tooltip, tooltip_step]).all()
 
 
 def test_line_chart_syncs_by_value_not_index() -> None:

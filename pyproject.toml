@@ -9,6 +9,7 @@
 [dependency-groups]
 dev = [
   "boto3>=1.40",
+  "hypothesis>=6.170.15",
   # Test-only: `client.artifacts.figure` takes anything with matplotlib's `savefig` signature
   # structurally, so neither distribution depends on it -- but its tests render real figures.
   "matplotlib>=3.10",

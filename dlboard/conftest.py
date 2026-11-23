@@ -18,6 +18,7 @@ import pendulum
 import pytest
 import sqlalchemy as sa
 from flask import Flask
+from hypothesis import settings
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from prometheus_client.parser import text_string_to_metric_families
@@ -106,6 +107,13 @@ class DurationTier(IntEnum):
         """The pytest marker for this tier, registered in `pyproject.toml`."""
         return getattr(pytest.mark, self.name.lower())
 
+
+settings.register_profile("dlboard", derandomize=True, deadline=None, database=None)
+settings.load_profile("dlboard")
+"""
+Hypothesis tries the same examples on every run, like every other test here, so a PR's CI never fails on an example
+its change didn't touch; `--hypothesis-seed` explores others by hand. No deadline: a slow CI runner is not a bug.
+"""
 
 DURATIONS_PATH = Path(__file__).parents[1] / "test-durations.json"
 """Per-test wall time in seconds, from the last `--record-durations` run; committed so CI sorts the same way."""
