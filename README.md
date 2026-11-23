@@ -1,28 +1,26 @@
 # dlboard
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![PyPI - dlboard](https://img.shields.io/pypi/v/dlboard?label=dlboard)](https://pypi.org/project/dlboard/)
-[![PyPI - dlboard-client](https://img.shields.io/pypi/v/dlboard-client?label=dlboard-client)](https://pypi.org/project/dlboard-client/)
-[![CI](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml?query=branch%3Amain)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0) [![PyPI - dlboard](https://img.shields.io/pypi/v/dlboard?label=dlboard)](https://pypi.org/project/dlboard/) [![PyPI - dlboard-client](https://img.shields.io/pypi/v/dlboard-client?label=dlboard-client)](https://pypi.org/project/dlboard-client/) [![CI](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml?query=branch%3Amain)
 
 **A free, self-hosted ML experiment tracker** that's as easy to run as TensorBoard, purpose-built for comparing runs and scaling to teams, large and small.
 
-Browse experiments side-by-side, compare metrics across runs, track hyperparameters, and log artifacts — all without leaving your infrastructure. dlboard is a modern web UI built on Dash/Dash-Mantine, with a PyTorch Lightning logger client that ships metrics and artifacts to your server over a REST API.
+Browse experiments side-by-side, compare metrics across runs, track hyperparameters, and log artifacts — all without leaving your infrastructure.
+dlboard is a modern web UI built on Dash/Dash-Mantine, with a PyTorch Lightning logger client that ships metrics and artifacts to your server over a REST API.
 
 ## Quick Start
 
 ### 1. Install
 
-dlboard is two packages. Install whichever matches the machine:
+dlboard is two packages.
+Install whichever matches the machine:
 
 ```bash
 pip install dlboard                       # the server and the `dlboard` command (includes the client)
 pip install "dlboard-client[lightning]"   # just the logger, for a training environment
 ```
 
-They don't need to be on the same machine: install `dlboard` where you want to browse runs, and
-`dlboard-client[lightning]` wherever you train. Postgres and S3 support are extras of the server:
-`pip install "dlboard[postgres,s3]"`.
+They don't need to be on the same machine: install `dlboard` where you want to browse runs, and `dlboard-client[lightning]` wherever you train.
+Postgres and S3 support are extras of the server: `pip install "dlboard[postgres,s3]"`.
 
 ### 2. Run
 
@@ -30,7 +28,8 @@ They don't need to be on the same machine: install `dlboard` where you want to b
 dlboard serve local
 ```
 
-That's it. Visit `http://localhost:8050` and you'll have a clean, modern experiment tracker running locally with SQLite and local disk storage — no database setup, no configuration needed.
+That's it.
+Visit `http://localhost:8050` and you'll have a clean, modern experiment tracker running locally with SQLite and local disk storage — no database setup, no configuration needed.
 
 ### 3. Log a training run
 
@@ -105,7 +104,8 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 ![The run-compare modal, listing the hyperparameters and metrics that differ between four runs](docs/images/run-compare.png)
 
-**Pins and comparisons** — Pin the runs that matter in your team's colour, then draw runs from several experiments on one dashboard. Runs are labelled by experiment, and every run pinned in a colour is two clicks to compare:
+**Pins and comparisons** — Pin the runs that matter in your team's colour, then draw runs from several experiments on one dashboard.
+Runs are labelled by experiment, and every run pinned in a colour is two clicks to compare:
 
 ![A comparison of a sweep and the baseline experiment, one chart over runs of both and the list of the comparison's runs](docs/images/comparison.png)
 
@@ -113,11 +113,13 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 ![The Ctrl+K jump palette, open and matching an experiment by name](docs/images/jump-palette.png)
 
-**Many charts** — Set a panel's or the whole page's chart settings once (smoothing, height, the x-axis, a log scale…) and every chart is drawn with them, a panel's over the page's, except a chart you lock to its own. Filter a panel's charts to set them on just the ones the filter matches, or to delete those together; an edit to a page that is not yours is saved in a copy of your own, and it asks whether to keep it.
+**Many charts** — Set a panel's or the whole page's chart settings once (smoothing, height, the x-axis, a log scale…) and every chart is drawn with them, a panel's over the page's, except a chart you lock to its own.
+Filter a panel's charts to set them on just the ones the filter matches, or to delete those together; an edit to a page that is not yours is saved in a copy of your own, and it asks whether to keep it.
 
 ## Deployment
 
-**Local development** is just `dlboard serve local`. For production deployments:
+**Local development** is just `dlboard serve local`.
+For production deployments:
 
 - **Docker** — See [docs/docker.md](docs/docker.md) for building an image with Postgres + S3 support
 - **Custom plugins** — Bring your own storage backend, auth provider, or chart types:
@@ -127,7 +129,8 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
   ```
 
   See [docs/plugins/overview.md](docs/plugins/overview.md) for the plugin protocol.
-- **Multi-user with auth** — Swap in `dlboard.plugins.PASSWORD_AUTH` for user sign-in and API tokens. See [docs/plugins/auth.md](docs/plugins/auth.md).
+- **Multi-user with auth** — Swap in `dlboard.plugins.PASSWORD_AUTH` for user sign-in and API tokens.
+  See [docs/plugins/auth.md](docs/plugins/auth.md).
 
 ## Development
 
@@ -145,13 +148,14 @@ uv run prek run --all-files         # run pre-commit hooks manually
 
 ## Learn More
 
-[The docs index](docs/README.md) lists every page by what you're doing: running a server, operating it, or
-extending it with plugins. New here? Start with [architecture](docs/architecture.md) for how dlboard fits together,
-and [client & logging](docs/client.md) for sending it runs from a training script.
+[The docs index](docs/README.md) lists every page by what you're doing: running a server, operating it, or extending it with plugins.
+New here?
+Start with [architecture](docs/architecture.md) for how dlboard fits together, and [client & logging](docs/client.md) for sending it runs from a training script.
 
 ## Contributing
 
-Pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and expectations.
+Pull requests are welcome.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and expectations.
 
 The project follows these principles:
 
@@ -161,18 +165,22 @@ The project follows these principles:
 
 ## AI Usage
 
-I started dlboard as a personal project coded by yours truly. As I went down the rabbit hole of implementation I realized
-I was spending a _ton_ of time twiddling with webdev instead of actually doing useful work. At some level, experiment
-tracker libraries live and die by their browser experience and their offered feature set. I set out to make a free, open-source
-tool that I actually wanted to use for my own projects. Making something I actually wanted to use became a behemoth of
-wiring up dash app components in ways that were performant and made sense. So, I decided that it'd be better to get an app
-out the door into hands of users than it would be to do everything by hand.
+I started dlboard as a personal project coded by yours truly.
+As I went down the rabbit hole of implementation I realized I was spending a _ton_ of time twiddling with webdev instead of actually doing useful work.
+At some level, experiment tracker libraries live and die by their browser experience and their offered feature set.
+I set out to make a free, open-source tool that I actually wanted to use for my own projects.
+Making something I actually wanted to use became a behemoth of wiring up dash app components in ways that were performant and made sense.
+So, I decided that it'd be better to get an app out the door into hands of users than it would be to do everything by hand.
 
-So, is the app coded in a way I personally would have written it? Absolutely not. Does it work and provide value today instead of 6 months
-down the line? Yeah, it does. However, I remain a healthy skeptic of AI generated code. Therefore, I will only accept PRs (for now) that I myself
-can review and understand. That means contributors to this library need to hold their tools to a high standard and follow
-best practices for submitting PRs and features just like you would if you had coded it yourself.
+So, is the app coded in a way I personally would have written it?
+Absolutely not.
+Does it work and provide value today instead of 6 months down the line?
+Yeah, it does.
+However, I remain a healthy skeptic of AI generated code.
+Therefore, I will only accept PRs (for now) that I myself can review and understand.
+That means contributors to this library need to hold their tools to a high standard and follow best practices for submitting PRs and features just like you would if you had coded it yourself.
 
-tl;dr
-Can I submit AI vibe-coded-PRs for plugins I want that I think are useful to the community? Yes you can.
-Will I give serious reviews and (if they're too big) ask you to split features up into a stack up so I can review them properly? Also yes.
+tl;dr Can I submit AI vibe-coded-PRs for plugins I want that I think are useful to the community?
+Yes you can.
+Will I give serious reviews and (if they're too big) ask you to split features up into a stack up so I can review them properly?
+Also yes.

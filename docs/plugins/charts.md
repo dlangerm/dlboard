@@ -2,139 +2,88 @@
 
 ## What is this
 
-A chart plugin defines one `ChartType` — a way to turn parameters and a dataframe of logged data
-into a rendered Dash component. `ChartType[P, D, C]` (`dlboard/models/_view.py`) is generic over
-its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
-Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`,
-`histogram.py`, `series_band.py`, `plotly_chart.py`, `console.py`, `scatter.py`, `parallel_coordinates.py`,
-`run_context.py` (`dlboard/plugins/charts/`). `run_context.py` lists what produced each run shown (its `RunContext`: the
-commit, the command, the machine, the packages), a fact a row and a run a column, filtered by section or to the facts
-the runs differ in, with each run's uncommitted changes (`context/git.diff`) linked under it. `scatter.py` draws a point per run, its latest value of `y` against its `x`, either of which
-may be a hyperparameter or a metric; `parallel_coordinates.py` draws an axis per hyperparameter (every one the runs
-shown don't all share, or those named in `hparams`, at most `max_axes`) and one for a metric, a line per run coloured by
-the metric, brushable along each axis. Both read a row per run (`MetricReduction.LATEST`, and the hyperparameters), so
-they cost the runs a panel draws, never how long those trained; both draw with Plotly in the theme (`_themed_figure.py`). `console.py` shows what a
-run printed (`models.CONSOLE_KEY`, a chunk per step): each run's newest chunk, read as a `WindowAt.LATEST` window, with
-Older/Newer reading the chunk beside it alone, and a filter over the lines of the one on show. `bar_chart.py` draws a group of bars for each value of its `x_axis` (a
-hyperparameter, a metric, the step, or the run), and in it a bar for each run that has that value, in the run's color:
-runs that share a hidden size stand side by side, rather than being merged into one bar. A bar's height is the run's
-last-logged value (`latest`, the default, which reads no more than that) or an `aggregation` (`mean`, `median`, `min`,
-`max`, `sum`, `count`) of every value it logged in that group, which reads every step as a line chart does.
+A chart plugin defines one `ChartType` — a way to turn parameters and a dataframe of logged data into a rendered Dash component.
+`ChartType[P, D, C]` (`dlboard/models/_view.py`) is generic over its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
+Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`, `histogram.py`, `series_band.py`, `plotly_chart.py`, `console.py`, `scatter.py`, `parallel_coordinates.py`, `run_context.py` (`dlboard/plugins/charts/`).
+`run_context.py` lists what produced each run shown (its `RunContext`: the commit, the command, the machine, the packages), a fact a row and a run a column, filtered by section or to the facts the runs differ in, with each run's uncommitted changes (`context/git.diff`) linked under it.
+`scatter.py` draws a point per run, its latest value of `y` against its `x`, either of which may be a hyperparameter or a metric; `parallel_coordinates.py` draws an axis per hyperparameter (every one the runs shown don't all share, or those named in `hparams`, at most `max_axes`) and one for a metric, a line per run coloured by the metric, brushable along each axis.
+Both read a row per run (`MetricReduction.LATEST`, and the hyperparameters), so they cost the runs a panel draws, never how long those trained; both draw with Plotly in the theme (`_themed_figure.py`).
+`console.py` shows what a run printed (`models.CONSOLE_KEY`, a chunk per step): each run's newest chunk, read as a `WindowAt.LATEST` window, with Older/Newer reading the chunk beside it alone, and a filter over the lines of the one on show.
+`bar_chart.py` draws a group of bars for each value of its `x_axis` (a hyperparameter, a metric, the step, or the run), and in it a bar for each run that has that value, in the run's color: runs that share a hidden size stand side by side, rather than being merged into one bar.
+A bar's height is the run's last-logged value (`latest`, the default, which reads no more than that) or an `aggregation` (`mean`, `median`, `min`, `max`, `sum`, `count`) of every value it logged in that group, which reads every step as a line chart does.
 
 ![A scatter of each run's validation loss against its learning rate on a log axis, beside parallel coordinates of the sweep's hyperparameters coloured by that loss](../images/hparam-charts.png)
 
-`file_list.py` is what an artifact a browser can't show inline gets (a
-checkpoint, say): its files by run and step, each with a download link. It is paged and sortable, and
-splits files into tabs by what they are -- for the checkpoints `DLBoardLogger` uploads, `Latest`, `Best`
-and `Top-k`, read from the `tag` and `score` tags the logger records. Set `key_prefix` (say
-`checkpoints/`) instead of `key` and one chart lists every key under it, so a run's hundreds of
-checkpoints (one key apiece) are one list, and Auto-generate makes exactly that.
+`file_list.py` is what an artifact a browser can't show inline gets (a checkpoint, say): its files by run and step, each with a download link.
+It is paged and sortable, and splits files into tabs by what they are -- for the checkpoints `DLBoardLogger` uploads, `Latest`, `Best` and `Top-k`, read from the `tag` and `score` tags the logger records.
+Set `key_prefix` (say `checkpoints/`) instead of `key` and one chart lists every key under it, so a run's hundreds of checkpoints (one key apiece) are one list, and Auto-generate makes exactly that.
 
-`plotly_chart.py` (chart type `plotly`) draws a Plotly figure you logged (`PlotlyFigure`, see
-[Client & logging](../client.md)) as the interactive figure it is, with Plotly's own hover, zoom, pan and legend, rather
-than as a picture of it. The server never reads a figure: it hands the browser each run's figure URL at each step, as
-the image chart does its pictures, and the browser fetches the one on show (keeping the ones it has fetched) and draws
-it. A figure logged at several steps gets a slider over them, which keeps where you zoomed and what you hid as it moves
-(`keep_view_across_steps`), and moves with the other sliders of a panel that syncs, an image chart's too (a prediction's
-picture and its PR curve at the same step); a figure logged once has none. Each run gets a figure of its own, in a grid
-of the panel's columns paged by its charts-per-page; `combine_runs` draws every run's traces in one figure instead,
-named and colored by run, for figures where that makes sense (curves, scatters, not heatmaps). A figure is drawn in the
-page's colors in either color scheme, its own template replaced by one of dlboard's, so what the figure sets itself (a
-trace's color, a title) is kept; `use_figure_theme` draws it in the theme it was logged with. A figure's own `height` and `width` give way to the chart's `height` and the panel's width. Auto-generate
-makes a `plotly` chart for each key a figure is logged under.
+`plotly_chart.py` (chart type `plotly`) draws a Plotly figure you logged (`PlotlyFigure`, see [Client & logging](../client.md)) as the interactive figure it is, with Plotly's own hover, zoom, pan and legend, rather than as a picture of it.
+The server never reads a figure: it hands the browser each run's figure URL at each step, as the image chart does its pictures, and the browser fetches the one on show (keeping the ones it has fetched) and draws it.
+A figure logged at several steps gets a slider over them, which keeps where you zoomed and what you hid as it moves (`keep_view_across_steps`), and moves with the other sliders of a panel that syncs, an image chart's too (a prediction's picture and its PR curve at the same step); a figure logged once has none.
+Each run gets a figure of its own, in a grid of the panel's columns paged by its charts-per-page; `combine_runs` draws every run's traces in one figure instead, named and colored by run, for figures where that makes sense (curves, scatters, not heatmaps).
+A figure is drawn in the page's colors in either color scheme, its own template replaced by one of dlboard's, so what the figure sets itself (a trace's color, a title) is kept; `use_figure_theme` draws it in the theme it was logged with.
+A figure's own `height` and `width` give way to the chart's `height` and the panel's width.
+Auto-generate makes a `plotly` chart for each key a figure is logged under.
 
-Four runs' precision-recall curves, logged as a figure at each of four steps, drawn in one figure (`combine_runs`) at
-the latest step, with the slider over the steps:
+Four runs' precision-recall curves, logged as a figure at each of four steps, drawn in one figure (`combine_runs`) at the latest step, with the slider over the steps:
 
 ![A Plotly chart of every run's precision-recall curve in one figure, with a slider over the steps](../images/plotly-chart.png)
 
-A figure logged with bindings is a *template* once data has been logged into it (`PlotlyData`, logged under the
-template's key plus `_$data`, see `plotly_data_key`): the same chart draws the template with each run's data in the
-attributes its bindings name (trace 0's `lat` and `lon` from the `lat` and `lon` columns, say), and the rest of the
-figure as it was logged. `data_steps` says which steps' data: `accumulate` (the default) draws every step's in step
-order, so a column grows by each step's values and a 2-D column by its rows (a trajectory, a waterfall); `latest` draws
-each run's latest step's alone (a confusion matrix as it stands now); `scrub` draws one step's at a time, with a
-slider. `accumulate` draws at most `max_data_steps` (256) steps per run, keeping every 2nd, 4th, ... step of a longer
-run and always its latest, so the steps drawn stay put as it trains, and the chart says so under itself. With
-`combine_runs`, each run's bound traces are drawn in one figure, named and colored by run, and the traces no binding
-names once. The template is the newest run's, so a run that logs only data is drawn into it too. Every step's data is
-a file the browser fetches, so a chart costs what it draws: log a template's data every few steps, not every step.
+A figure logged with bindings is a *template* once data has been logged into it (`PlotlyData`, logged under the template's key plus `_$data`, see `plotly_data_key`): the same chart draws the template with each run's data in the attributes its bindings name (trace 0's `lat` and `lon` from the `lat` and `lon` columns, say), and the rest of the figure as it was logged.
+`data_steps` says which steps' data: `accumulate` (the default) draws every step's in step order, so a column grows by each step's values and a 2-D column by its rows (a trajectory, a waterfall); `latest` draws each run's latest step's alone (a confusion matrix as it stands now); `scrub` draws one step's at a time, with a slider.
+`accumulate` draws at most `max_data_steps` (256) steps per run, keeping every 2nd, 4th, ...
+step of a longer run and always its latest, so the steps drawn stay put as it trains, and the chart says so under itself.
+With `combine_runs`, each run's bound traces are drawn in one figure, named and colored by run, and the traces no binding names once.
+The template is the newest run's, so a run that logs only data is drawn into it too.
+Every step's data is a file the browser fetches, so a chart costs what it draws: log a template's data every few steps, not every step.
 
-The figure is fetched from `/artifact/<id>` by the browser, so with the S3 artifact store in `presign` download mode
-(`DLBOARD_S3_DOWNLOAD_MODE`) the bucket needs a CORS rule allowing `GET` from dlboard's origin; the filesystem store and
-S3's `proxy` mode serve it from dlboard's own origin (in `presign` mode the S3 plugin lets the page load from the bucket).
-Anything a figure would load from another server itself (a `layout.images` URL, a GeoJSON by URL, a map's style and
-tiles, a `geo` map's outlines from Plotly's CDN) is refused by the browser, because every page's Content-Security-Policy
-lets it load pictures, media, fonts and data from dlboard alone: otherwise anyone who can log to a project could make the
-browser of everyone who opens its charts request a URL of their choosing. `DLBOARD_PLOTLY_REMOTE_RESOURCES` lifts that.
-While it holds, a map is drawn on the tiles of `DLBOARD_PLOTLY_MAP_TILES` (a tile server the deployment chooses, which
-the page is then let load from) or on a blank background; a picture given as a `data:` URI is always drawn.
+The figure is fetched from `/artifact/<id>` by the browser, so with the S3 artifact store in `presign` download mode (`DLBOARD_S3_DOWNLOAD_MODE`) the bucket needs a CORS rule allowing `GET` from dlboard's origin; the filesystem store and S3's `proxy` mode serve it from dlboard's own origin (in `presign` mode the S3 plugin lets the page load from the bucket).
+Anything a figure would load from another server itself (a `layout.images` URL, a GeoJSON by URL, a map's style and tiles, a `geo` map's outlines from Plotly's CDN) is refused by the browser, because every page's Content-Security-Policy lets it load pictures, media, fonts and data from dlboard alone: otherwise anyone who can log to a project could make the browser of everyone who opens its charts request a URL of their choosing.
+`DLBOARD_PLOTLY_REMOTE_RESOURCES` lifts that.
+While it holds, a map is drawn on the tiles of `DLBOARD_PLOTLY_MAP_TILES` (a tile server the deployment chooses, which the page is then let load from) or on a blank background; a picture given as a `data:` URI is always drawn.
 
-A plugin whose deployment needs the page to load from somewhere else adds it with `dlboard.serve.allow_resources_from(app,
-url)` (that URL's origin) in its `plug()`, or `allow_resources_from_anywhere(app)`.
+A plugin whose deployment needs the page to load from somewhere else adds it with `dlboard.serve.allow_resources_from(app, url)` (that URL's origin) in its `plug()`, or `allow_resources_from_anywhere(app)`.
 
-`histogram.py` charts a logged histogram (see [Client & logging](../client.md): values binned in your training
-process, so only buckets are sent) as it changes over steps -- per-layer gradient norms or weights, a distribution
-of per-sample losses -- without averaging it away. A `display` setting picks the view: **heatmap** (the default;
-step across, value bucket up, shaded by the share of that step's values in the bucket, in a `colorscale` of your
-choice), **bands** (the median with the middle `band_share` of the values -- 0.68 by default -- and the min-max
-around it, per step) or **step** (the distribution at one step as bars, with a slider to move through the steps).
-Each is one figure with a row per run, labelled with the run's name and the color it has everywhere else, and a
-panel's charts-per-page limits how many rows: the most recent runs are shown. `normalize` (on by default) shades
-each step as a share of its own values so steps that logged different numbers of values compare; turn it off for raw
-counts.
+`histogram.py` charts a logged histogram (see [Client & logging](../client.md): values binned in your training process, so only buckets are sent) as it changes over steps -- per-layer gradient norms or weights, a distribution of per-sample losses -- without averaging it away.
+A `display` setting picks the view: **heatmap** (the default; step across, value bucket up, shaded by the share of that step's values in the bucket, in a `colorscale` of your choice), **bands** (the median with the middle `band_share` of the values -- 0.68 by default -- and the min-max around it, per step) or **step** (the distribution at one step as bars, with a slider to move through the steps).
+Each is one figure with a row per run, labelled with the run's name and the color it has everywhere else, and a panel's charts-per-page limits how many rows: the most recent runs are shown.
+`normalize` (on by default) shades each step as a share of its own values so steps that logged different numbers of values compare; turn it off for raw counts.
 
-Whatever was logged, a chart is cheap to open, and each bound is a setting. It reads about
-`DLBOARD_MAX_HISTOGRAM_STEPS` (256) steps per run: the store thins a longer run to every 2ⁿ-th step from its first
-(keeping its latest too) before anything is read back, so a run that trained for a million steps costs the same to
-open as one that trained for a thousand, and the steps shown stay put as it trains rather than shifting on every
-refresh. It draws at most `max_rows` (128) value buckets per run, merging a finer lattice, and the step view's
-slider moves through at most `max_slider_steps` (300) of them. The accent color of the bands and bars, the space
-between rows, the ticks named on a value axis and the default shape are `DLBOARD_HISTOGRAM_*` settings, listed in
-[Configuration](../configuration.md). Auto-generate makes a heatmap for each histogram key.
+Whatever was logged, a chart is cheap to open, and each bound is a setting.
+It reads about `DLBOARD_MAX_HISTOGRAM_STEPS` (256) steps per run: the store thins a longer run to every 2ⁿ-th step from its first (keeping its latest too) before anything is read back, so a run that trained for a million steps costs the same to open as one that trained for a thousand, and the steps shown stay put as it trains rather than shifting on every refresh.
+It draws at most `max_rows` (128) value buckets per run, merging a finer lattice, and the step view's slider moves through at most `max_slider_steps` (300) of them.
+The accent color of the bands and bars, the space between rows, the ticks named on a value axis and the default shape are `DLBOARD_HISTOGRAM_*` settings, listed in [Configuration](../configuration.md).
+Auto-generate makes a heatmap for each histogram key.
 
-`table_chart.py` is a data table. Two settings shape it: what a **row** is (`rows`), and which **columns** it
-shows (`show_metrics`, `show_hparams`, `show_artifacts`). A new table shows no columns until one is picked, so it
-says so where its values would be; a metric, hyperparameter or artifact picked in its settings fills it in.
+`table_chart.py` is a data table.
+Two settings shape it: what a **row** is (`rows`), and which **columns** it shows (`show_metrics`, `show_hparams`, `show_artifacts`).
+A new table shows no columns until one is picked, so it says so where its values would be; a metric, hyperparameter or artifact picked in its settings fills it in.
 
-- `rows: run` (the default) is a row per run: its hyperparameters beside the latest value of each metric --
-  each metric's own latest, as in the Runs table, not whatever was logged at the run's last step -- and its
-  latest artifact under each key shown, with the tags. `aggregate` swaps "latest" for the first, minimum,
-  maximum or mean of a metric.
-- `rows: field` is a row for each value of a metric, `row_field` (`step`, `epoch`, ...). By default each run
-  has its own rows; with `spread_by_run` the runs sit side by side, a column group each, which is how to
-  compare a metric across runs. Anything a run logged between two values of the row field belongs to the
-  earlier, so `rows: field`, `row_field: epoch`, `spread_by_run` and `show_artifacts: [samples/*]` is a row per
-  epoch with each run's latest image of that epoch.
-- `rows: artifact` is a row per logged artifact, beside what its run logged at that step, with each tag a
-  column that sorts and filters as the number or text it is: the way to find a sample among hundreds.
+- `rows: run` (the default) is a row per run: its hyperparameters beside the latest value of each metric -- each metric's own latest, as in the Runs table, not whatever was logged at the run's last step -- and its latest artifact under each key shown, with the tags.
+  `aggregate` swaps "latest" for the first, minimum, maximum or mean of a metric.
+- `rows: field` is a row for each value of a metric, `row_field` (`step`, `epoch`, ...).
+  By default each run has its own rows; with `spread_by_run` the runs sit side by side, a column group each, which is how to compare a metric across runs.
+  Anything a run logged between two values of the row field belongs to the earlier, so `rows: field`, `row_field: epoch`, `spread_by_run` and `show_artifacts: [samples/*]` is a row per epoch with each run's latest image of that epoch.
+- `rows: artifact` is a row per logged artifact, beside what its run logged at that step, with each tag a column that sorts and filters as the number or text it is: the way to find a sample among hundreds.
 
-Each `show_*` list takes names, or patterns in which a `*` stands for any run of characters and a `#` for a run of
-digits: `eval/*` is a column for every key starting `eval/`, including ones logged later, `layer_*/grad_norm` is one such
-pattern, `layer_#/grad_norm` names the numbered layers and nothing else, and `*` alone is all of them. The metrics and hyperparameters
-start at `*`; an empty list shows none, so a table of only artifacts is one. An image is a thumbnail linking to
-the full one, with the overlays logged over it at the same step drawn on it as an image chart draws them (an overlay of
-a picture the table shows is not a column or a row of its own; one chosen without its picture is a file like any other);
-any other file is a download link. Runs are named and colored as in the charts and the Runs
-table, every column filters in place, and a table keeps its sort, filters and page when a live update
-redraws it. A table saved with the earlier `mode` settings (`runs`, `pivot`, `artifacts`) opens as the rows
-and columns that show the same table.
+Each `show_*` list takes names, or patterns in which a `*` stands for any run of characters and a `#` for a run of digits: `eval/*` is a column for every key starting `eval/`, including ones logged later, `layer_*/grad_norm` is one such pattern, `layer_#/grad_norm` names the numbered layers and nothing else, and `*` alone is all of them.
+The metrics and hyperparameters start at `*`; an empty list shows none, so a table of only artifacts is one.
+An image is a thumbnail linking to the full one, with the overlays logged over it at the same step drawn on it as an image chart draws them (an overlay of a picture the table shows is not a column or a row of its own; one chosen without its picture is a file like any other); any other file is a download link.
+Runs are named and colored as in the charts and the Runs table, every column filters in place, and a table keeps its sort, filters and page when a live update redraws it.
+A table saved with the earlier `mode` settings (`runs`, `pivot`, `artifacts`) opens as the rows and columns that show the same table.
 
-A chart is added or edited in a pane docked beside the panels, so the rest of the page stays in view. Editing a chart
-draws it, as the form has it, in its own card in place of the saved chart; the saved chart is left under it, so
-Cancel puts it back exactly as it was and a live update never overwrites the draft. A chart being added is previewed
-in the pane. Settings are grouped into collapsible sections (Data, Display, and a chart type's own).
+A chart is added or edited in a pane docked beside the panels, so the rest of the page stays in view.
+Editing a chart draws it, as the form has it, in its own card in place of the saved chart; the saved chart is left under it, so Cancel puts it back exactly as it was and a live update never overwrites the draft.
+A chart being added is previewed in the pane.
+Settings are grouped into collapsible sections (Data, Display, and a chart type's own).
 
 ![The chart editor docked beside the panels, with the chart being edited drawn in its own card](../images/chart-editor.png)
 
-The built-in line charts, and the image series that steps through logged images. A line chart's `smoothing` (0 to 0.99)
-smooths each run as TensorBoard does, a debiased moving average computed over every point read before the line is
-thinned, so the curve is the same at any `max_points`; the tooltip names each logged value beside its smoothed one. Its
-`y_scale` of `log` spaces values by order of magnitude, leaving out (and saying how many) values at or below 0. Its
-`group_by` names a hyperparameter: a line per value of it (at most `max_groups`), the mean of its runs in a band from the
-lowest to the highest, over the runs the panel draws, in a color that comes from the value (unless another value on
-the chart has it first: no two groups are drawn alike, and past eight the colors come round again dashed); it groups
-by one key and exact values only, and draws with Plotly, which bands need:
+The built-in line charts, and the image series that steps through logged images.
+A line chart's `smoothing` (0 to 0.99) smooths each run as TensorBoard does, a debiased moving average computed over every point read before the line is thinned, so the curve is the same at any `max_points`; the tooltip names each logged value beside its smoothed one.
+Its `y_scale` of `log` spaces values by order of magnitude, leaving out (and saying how many) values at or below 0.
+Its `group_by` names a hyperparameter: a line per value of it (at most `max_groups`), the mean of its runs in a band from the lowest to the highest, over the runs the panel draws, in a color that comes from the value (unless another value on the chart has it first: no two groups are drawn alike, and past eight the colors come round again dashed); it groups by one key and exact values only, and draws with Plotly, which bands need:
 
 ![A line chart of validation loss on a log axis, smoothed, a line per batch size with a band from its lowest run to its highest](../images/grouped-line-chart.png)
 
@@ -142,84 +91,67 @@ by one key and exact values only, and draws with Plotly, which bands need:
 
 ![An image-series chart with a legend of its layers and what they hold, drawn over each picture](../images/image-series.png)
 
-An image series draws layers over each picture. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md))
-or any image, such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its
-thumbnail and in its enlarged view. A picture a layer has nothing for at its step is shown without it. Every overlay
-logged over an image (`sample_$overlay`, or one per `name` after it: `sample_$overlay/truth`) is drawn over it, including
-ones logged after the chart was made, and none of them gets a chart of its own.
+An image series draws layers over each picture.
+A layer is an `Overlay` of shapes (see [docs/client.md](../client.md)) or any image, such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its thumbnail and in its enlarged view.
+A picture a layer has nothing for at its step is shown without it.
+Every overlay logged over an image (`sample_$overlay`, or one per `name` after it: `sample_$overlay/truth`) is drawn over it, including ones logged after the chart was made, and none of them gets a chart of its own.
 
-The chart editor's **Layers** table has a row for every layer the chart draws, whether or not the chart saved one: the
-overlays of the picture, shown by their names, then any other artifact you add by its key, which the table suggests as you
-type. Each row says whether the layer is `shown`, `hidden` (in the legend, and drawn only when a viewer shows it) or `off`
-(not drawn, and not in the legend), and how opaque it is, a slider from 0 to 1. An overlay's row is the chart's to keep: it
-can be restyled but not renamed or removed, and set to `off` to leave the overlay out, since the chart draws every overlay
-logged over its picture. A row left as it is by default is not saved, so a later change to those defaults reaches it. A
-chart saved with the earlier `overlays` setting opens as the `layers` rows that draw the same. While the
-picture for the slider's step is still downloading, its thumbnail shows a spinner over the previous picture.
+The chart editor's **Layers** table has a row for every layer the chart draws, whether or not the chart saved one: the overlays of the picture, shown by their names, then any other artifact you add by its key, which the table suggests as you type.
+Each row says whether the layer is `shown`, `hidden` (in the legend, and drawn only when a viewer shows it) or `off` (not drawn, and not in the legend), and how opaque it is, a slider from 0 to 1.
+An overlay's row is the chart's to keep: it can be restyled but not renamed or removed, and set to `off` to leave the overlay out, since the chart draws every overlay logged over its picture.
+A row left as it is by default is not saved, so a later change to those defaults reaches it.
+A chart saved with the earlier `overlays` setting opens as the `layers` rows that draw the same.
+While the picture for the slider's step is still downloading, its thumbnail shows a spinner over the previous picture.
 
-Over the top-left of each picture, a legend says what is drawn on it. It starts folded to its title, "Layers" (so the picture
-is clear); click that to open it. Each layer is a row: tick or untick it to show or
-hide that layer on every picture of the chart, at once and without loading anything again, and shift-click one to show it
-alone (again to bring the rest back), which is how a truth and a prediction are compared. What each layer holds is
-listed on its row in its colors, so a class of one layer is never mistaken for a class of another. The eye hides every
-layer, and holding it (or a picture) shows the picture without them for as long as it is held; "Layers" folds the legend
-away again, and a thumbnail too narrow for a list shows the eye alone (the legend sits in the corner of the thumbnail or of the enlarged view, whatever the size of the picture in it, or its zoom). A layer the picture on show has nothing for is
-dimmed. What a viewer changes this way is theirs alone: it is kept for the browser tab and never changes the saved chart
-(opening the legend is only a way of looking, and is not a change).
-The chart's card says so ("View changed") and offers to **Save as default**, which writes which layers are shown into
-the chart's `layers` setting (into a view of your own, if the page is not yours), or to **Reset** it.
+Over the top-left of each picture, a legend says what is drawn on it.
+It starts folded to its title, "Layers" (so the picture is clear); click that to open it.
+Each layer is a row: tick or untick it to show or hide that layer on every picture of the chart, at once and without loading anything again, and shift-click one to show it alone (again to bring the rest back), which is how a truth and a prediction are compared.
+What each layer holds is listed on its row in its colors, so a class of one layer is never mistaken for a class of another.
+The eye hides every layer, and holding it (or a picture) shows the picture without them for as long as it is held; "Layers" folds the legend away again, and a thumbnail too narrow for a list shows the eye alone (the legend sits in the corner of the thumbnail or of the enlarged view, whatever the size of the picture in it, or its zoom).
+A layer the picture on show has nothing for is dimmed.
+What a viewer changes this way is theirs alone: it is kept for the browser tab and never changes the saved chart (opening the legend is only a way of looking, and is not a change).
+The chart's card says so ("View changed") and offers to **Save as default**, which writes which layers are shown into the chart's `layers` setting (into a view of your own, if the page is not yours), or to **Reset** it.
 
-Click a picture to open it enlarged. Its header names the chart, the run (in its color) and the step, with **Download**:
-point at it and it offers its sizes (**Original**, **2x**, **4x**, **8x**, **Fit to** a number of pixels you type, 1920 to
-begin with, for the picture's longest side with the other in proportion, or **View**, which is what is on screen, the
-area you have zoomed and panned to), and one click on one saves a PNG at that size (Enter in the number does the same
-for **Fit to**). Every one has the layers shown drawn
-over the picture, and a legend of what they hold in its corner (a layer you have hidden is left out of both); a size that
-would be too big for a browser to draw is brought down to what it can. While the next picture is still downloading, the
-one on show is dimmed with a spinner over it, and the pictures a step either side are fetched ahead.
-The picture's tags are a table on its left, formatted as the chart's `tag_*` settings say. The enlarged view has the same
-legend as the thumbnails, sharing the chart's state (a layer hidden there is hidden on the thumbnails too, and holding the
-eye peeks past the layers). Scroll to zoom towards the pointer, drag to pan, and double-click to fit the picture to the
-view again; the controls over the picture have a slider, the zoom level (100% is one pixel of the picture to one of the
-screen, up to 6400%), and **Fit** and **100%** shortcuts. The layers move with the picture, and a small picture or mask is
-magnified in blocks. The `<` and `>` buttons beside the picture, the timeline under it and the left and right arrow keys
-move it through the chart's steps, moving the chart's own slider with it; the up and down arrow keys move through the
-runs. Moving keeps the zoom, to compare the same place.
+Click a picture to open it enlarged.
+Its header names the chart, the run (in its color) and the step, with **Download**: point at it and it offers its sizes (**Original**, **2x**, **4x**, **8x**, **Fit to** a number of pixels you type, 1920 to begin with, for the picture's longest side with the other in proportion, or **View**, which is what is on screen, the area you have zoomed and panned to), and one click on one saves a PNG at that size (Enter in the number does the same for **Fit to**).
+Every one has the layers shown drawn over the picture, and a legend of what they hold in its corner (a layer you have hidden is left out of both); a size that would be too big for a browser to draw is brought down to what it can.
+While the next picture is still downloading, the one on show is dimmed with a spinner over it, and the pictures a step either side are fetched ahead.
+The picture's tags are a table on its left, formatted as the chart's `tag_*` settings say.
+The enlarged view has the same legend as the thumbnails, sharing the chart's state (a layer hidden there is hidden on the thumbnails too, and holding the eye peeks past the layers).
+Scroll to zoom towards the pointer, drag to pan, and double-click to fit the picture to the view again; the controls over the picture have a slider, the zoom level (100% is one pixel of the picture to one of the screen, up to 6400%), and **Fit** and **100%** shortcuts.
+The layers move with the picture, and a small picture or mask is magnified in blocks.
+The `<` and `>` buttons beside the picture, the timeline under it and the left and right arrow keys move it through the chart's steps, moving the chart's own slider with it; the up and down arrow keys move through the runs.
+Moving keeps the zoom, to compare the same place.
 
 ![An image series' enlarged view, with its layers and their legend over the picture, the zoom controls, and the step timeline](../images/image-viewer.png)
 
-Viewer state is kept per experiment *and view*, so the same chart in two views of one experiment has a state of its own
-in each. It is an internal mechanism of dlboard's own charts for now (`ChartType.viewer_state_type()` and
-`ViewerState.applied_to(parameters)` are the Python side, and the image chart is the only one that uses them): the
-browser-side store is not a plugin interface yet, so a chart type of your own has no way to keep viewer state.
+Viewer state is kept per experiment *and view*, so the same chart in two views of one experiment has a state of its own in each.
+It is an internal mechanism of dlboard's own charts for now (`ChartType.viewer_state_type()` and `ViewerState.applied_to(parameters)` are the Python side, and the image chart is the only one that uses them): the browser-side store is not a plugin interface yet, so a chart type of your own has no way to keep viewer state.
 
 A table of runs, with an artifact column:
 
 ![A table chart](../images/table-chart.png)
 
-A histogram chart's heatmap, one row per run (here the gradient norms of a layer shrinking and tightening as
-four runs converge):
+A histogram chart's heatmap, one row per run (here the gradient norms of a layer shrinking and tightening as four runs converge):
 
 ![A histogram chart](../images/histogram-chart.png)
 
 ## When you'd need this
 
-You want a new way to visualize logged metrics/artifacts that the built-in line/bar/table/image/histogram
-charts don't cover — a scatter plot, a confusion matrix, anything with its own
-parameter shape and rendering.
+You want a new way to visualize logged metrics/artifacts that the built-in line/bar/table/image/histogram charts don't cover — a scatter plot, a confusion matrix, anything with its own parameter shape and rendering.
 
 ## How do I build one
 
 Subclass `ChartType` and implement its abstract methods:
 
-- `name: ClassVar[str]` — the registry key. Must be unique (see below).
+- `name: ClassVar[str]` — the registry key.
+  Must be unique (see below).
 - `parameter_type() -> type[P]` — the Pydantic model describing this chart's settings.
 - `render(parameters, dataframe) -> C` — turn one instance into a Dash component.
-- `data_request(parameters) -> DataRequest` — everything a chart with these settings reads. The panel reads what its
-  charts on screen ask for, once for all of them, and hands each chart a frame of only what it asked for: a row per run
-  and step (or a row per run, for a reduced metric), a column for each metric, `hparam__`, `artifact__` and histogram
-  column it asked for, and the run's name. A kind of data the request leaves out is not read for it at all. A line chart
-  is one line:
+- `data_request(parameters) -> DataRequest` — everything a chart with these settings reads.
+  The panel reads what its charts on screen ask for, once for all of them, and hands each chart a frame of only what it asked for: a row per run and step (or a row per run, for a reduced metric), a column for each metric, `hparam__`, `artifact__` and histogram column it asked for, and the run's name.
+  A kind of data the request leaves out is not read for it at all.
+  A line chart is one line:
 
   ```python
   @classmethod
@@ -229,124 +161,80 @@ Subclass `ChartType` and implement its abstract methods:
 
   Its fields, all empty by default:
 
-  - `metrics` and `metric_patterns` — the metrics drawn, by name (`loss`, and `step` or `timestamp_utc` for an x-axis)
-    and by pattern (`layer_*/grad_norm`), or `metric_patterns=EVERY_KEY` for every metric. A name is literal, so a
-    metric called `top#1` is named, not matched. A pattern is matched against the names logged when the panel is drawn,
-    so a chart of many metrics asks for them this way, not by listing each, and metrics logged later are included. In a
-    pattern a `*` stands for any run of characters (`/` included) and a `#` for a run of digits, so `accuracy/#,#/*` is
-    the cells of a grid and a class, and not `accuracy/3,7/aux/dog`. `KeyPatterns.captures(pattern, key)` hands back what
-    each wildcard stood for (`("3", "7", "dog")`), with the matcher the server used, so a chart can group keys by their
-    parts without a regular expression of its own. A pattern over thousands of metrics must not ask for their whole
-    history (that is a column for each metric and a row for each step): read their last value (`reductions`) or their
-    spread (`series`). A chart that draws every step of more than `DLBOARD_WIDE_HISTORY_METRICS` (200) metrics shows a
-    badge saying how many, and one over `DLBOARD_MAX_HISTORY_METRICS` (5,000) is not drawn, and their history not read.
-  - `reductions` — how much of each metric the chart draws from, by column. `MetricReductions(default=...,
-    by_column={...})` names a `MetricReduction` for every column, or for the ones in `by_column`. A chart that shows
-    where each run ended up, or a summary of its series, says so (`LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) and is
-    handed a row per run and metric instead of a row per step, which is what keeps it cheap on a long run: `LATEST` and
-    `FIRST` are probes of the index, the others are computed by the database. A chart that draws the series itself keeps
-    the default. Two charts of one panel that read a metric differently each get it as they asked: a mean beside a line
-    chart of the same metric is the database's to compute, not a history to fetch. A chart of every metric takes its
-    `default` for all of them, except the ones `by_column` names.
-  - `hparams` and `hparam_patterns` — the hyperparameters drawn, by name and by pattern (`EVERY_KEY` for every one). A
-    pattern is read whole, one small row per run, and the chart narrows it itself.
-  - `artifacts` and `artifact_prefixes` — the artifact keys drawn, by name, and every artifact whose key starts with one
-    of the prefixes, for a chart that lists a whole family (every `checkpoints/...` key) including keys logged later. A
-    prefix is literal: a `*` or `#` in it is part of the key.
-  - `artifact_window` — an `ArtifactWindow(key, steps)`, for a chart that shows one step of its artifacts at a time (the
-    image chart's slider): its artifacts are read at only the first `steps` of the steps `key` logged, and its frame
-    has a row for every step `key` logged, marked `True` in `artifact_logged_column(key)`, whether or not the step's
-    artifacts were read. The chart reads further windows itself as the viewer moves (`DataStore.artifact_steps`, and
-    `fetch_artifacts(..., steps=StepRange(first, last))`), so what it reads does not grow with the steps logged.
-  - `histograms` — the logged histogram keys the chart shows. A chart always names them: there is no "every histogram",
-    because a histogram is the most expensive thing a panel reads. A field naming one is a `ColumnKind.HISTOGRAM` in
-    `field_column_kinds()`.
-  - `series` — the spread of many metrics' values, as a set of `SeriesBandRequest`s: the patterns they match, a grid of
-    at most `grid` cells of steps, the newest `runs` runs, and optionally `group_by`, which wildcards of the pattern name
-    a metric's group. The panel reads each spread for the chart instead of each metric, as a `SeriesBand` per run, group
-    and step in the column `request.column`, whose cell for a step is a tuple with a band for each group. A `SeriesBand`
-    is the nearest-rank minimum, quartiles (`p25`, `p75`), median and maximum of the group's values in the cell, their
-    `mean`, how many metrics logged one (`count`), and which metric was the lowest and the highest (`minimum_key`,
-    `maximum_key`), so a chart can name the ones to look at.
+  - `metrics` and `metric_patterns` — the metrics drawn, by name (`loss`, and `step` or `timestamp_utc` for an x-axis) and by pattern (`layer_*/grad_norm`), or `metric_patterns=EVERY_KEY` for every metric.
+    A name is literal, so a metric called `top#1` is named, not matched.
+    A pattern is matched against the names logged when the panel is drawn, so a chart of many metrics asks for them this way, not by listing each, and metrics logged later are included.
+    In a pattern a `*` stands for any run of characters (`/` included) and a `#` for a run of digits, so `accuracy/#,#/*` is the cells of a grid and a class, and not `accuracy/3,7/aux/dog`.
+    `KeyPatterns.captures(pattern, key)` hands back what each wildcard stood for (`("3", "7", "dog")`), with the matcher the server used, so a chart can group keys by their parts without a regular expression of its own.
+    A pattern over thousands of metrics must not ask for their whole history (that is a column for each metric and a row for each step): read their last value (`reductions`) or their spread (`series`).
+    A chart that draws every step of more than `DLBOARD_WIDE_HISTORY_METRICS` (200) metrics shows a badge saying how many, and one over `DLBOARD_MAX_HISTORY_METRICS` (5,000) is not drawn, and their history not read.
+  - `reductions` — how much of each metric the chart draws from, by column.
+    `MetricReductions(default=...,     by_column={...})` names a `MetricReduction` for every column, or for the ones in `by_column`.
+    A chart that shows where each run ended up, or a summary of its series, says so (`LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) and is handed a row per run and metric instead of a row per step, which is what keeps it cheap on a long run: `LATEST` and `FIRST` are probes of the index, the others are computed by the database.
+    A chart that draws the series itself keeps the default.
+    Two charts of one panel that read a metric differently each get it as they asked: a mean beside a line chart of the same metric is the database's to compute, not a history to fetch.
+    A chart of every metric takes its `default` for all of them, except the ones `by_column` names.
+  - `hparams` and `hparam_patterns` — the hyperparameters drawn, by name and by pattern (`EVERY_KEY` for every one).
+    A pattern is read whole, one small row per run, and the chart narrows it itself.
+  - `artifacts` and `artifact_prefixes` — the artifact keys drawn, by name, and every artifact whose key starts with one of the prefixes, for a chart that lists a whole family (every `checkpoints/...` key) including keys logged later.
+    A prefix is literal: a `*` or `#` in it is part of the key.
+  - `artifact_window` — an `ArtifactWindow(key, steps)`, for a chart that shows one step of its artifacts at a time (the image chart's slider): its artifacts are read at only the first `steps` of the steps `key` logged, and its frame has a row for every step `key` logged, marked `True` in `artifact_logged_column(key)`, whether or not the step's artifacts were read.
+    The chart reads further windows itself as the viewer moves (`DataStore.artifact_steps`, and `fetch_artifacts(..., steps=StepRange(first, last))`), so what it reads does not grow with the steps logged.
+  - `histograms` — the logged histogram keys the chart shows.
+    A chart always names them: there is no "every histogram", because a histogram is the most expensive thing a panel reads.
+    A field naming one is a `ColumnKind.HISTOGRAM` in `field_column_kinds()`.
+  - `series` — the spread of many metrics' values, as a set of `SeriesBandRequest`s: the patterns they match, a grid of at most `grid` cells of steps, the newest `runs` runs, and optionally `group_by`, which wildcards of the pattern name a metric's group.
+    The panel reads each spread for the chart instead of each metric, as a `SeriesBand` per run, group and step in the column `request.column`, whose cell for a step is a tuple with a band for each group.
+    A `SeriesBand` is the nearest-rank minimum, quartiles (`p25`, `p75`), median and maximum of the group's values in the cell, their `mean`, how many metrics logged one (`count`), and which metric was the lowest and the highest (`minimum_key`, `maximum_key`), so a chart can name the ones to look at.
 
-    This is how to aggregate a family of thousands of metrics, such as `accuracy/{row},{col}/{class}`: ask for
-    `accuracy/#,#/*` with `group_by=(2,)` for a band per class, or `group_by=(0, 1)` for one per cell (at most
-    `max_groups`, 12 by default, are read), and draw the bands. Never ask for the history of the pattern. The grid
-    has fewer cells over many metrics, to keep the read to `BAND_PROBE_BUDGET` probes (`request.cells_for`). The read is an
-    ordered probe of the index for each metric, run and grid cell, so it costs the metrics matched, not the steps a run
-    trained, and a run that logs every 50 steps is covered as well as one that logs every step. Each cell is a stretch of
-    steps ending at the one shown (the grid's cells run end to end), and a metric counts in it with its newest write
-    there. `plugins/charts/series_band.py` is the reference chart (`_band_traces.nested_band` draws the five traces
-    of a spread, as the histogram chart's bands view does), and autogen uses it for a family of metrics that share a
-    template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
+    This is how to aggregate a family of thousands of metrics, such as `accuracy/{row},{col}/{class}`: ask for `accuracy/#,#/*` with `group_by=(2,)` for a band per class, or `group_by=(0, 1)` for one per cell (at most `max_groups`, 12 by default, are read), and draw the bands.
+    Never ask for the history of the pattern.
+    The grid has fewer cells over many metrics, to keep the read to `BAND_PROBE_BUDGET` probes (`request.cells_for`).
+    The read is an ordered probe of the index for each metric, run and grid cell, so it costs the metrics matched, not the steps a run trained, and a run that logs every 50 steps is covered as well as one that logs every step.
+    Each cell is a stretch of steps ending at the one shown (the grid's cells run end to end), and a metric counts in it with its newest write there.
+    `plugins/charts/series_band.py` is the reference chart (`_band_traces.nested_band` draws the five traces of a spread, as the histogram chart's bands view does), and autogen uses it for a family of metrics that share a template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
 
-    Draw a run in `series_color(run_id)` and, for a line, dashed as `series_dash(run_id)` (its `dasharray` for an SVG or
-    Recharts line, its `plotly` for Plotly's `line.dash`): the palette has eight colors, so runs eight apart share one
-    and are told apart by their dash. Label a run where no line is, a caption or a table's header, with
-    `series_swatch_class(run_id)`, a short line in the same color and dash.
+    Draw a run in `series_color(run_id)` and, for a line, dashed as `series_dash(run_id)` (its `dasharray` for an SVG or Recharts line, its `plotly` for Plotly's `line.dash`): the palette has eight colors, so runs eight apart share one and are told apart by their dash.
+    Label a run where no line is, a caption or a table's header, with `series_swatch_class(run_id)`, a short line in the same color and dash.
 
-    A chart drawn with Plotly cannot use the theme's colors as they are (`series_color` is a CSS variable, which Plotly
-    drops). Name them in the figure as `series_color(...)`, or `series_color(...)/0.12` for one at an opacity, and the
-    figure's colors (any `color`, `fillcolor`, `gridcolor` or `linecolor`, which may also be a variable such as
-    `var(--mantine-color-text)`) are resolved in the browser, in the theme's current color scheme and again when it
-    changes, so a run is the color it is in every other chart. `plotly_colors.js` resolves them, served once per app by
-    `_plotly_colors.serve_plotly_colors(app)` from each chart's `plug()`; `series_band_colors.js` uses it for the
-    reference chart, which keeps its figure in a `dcc.Store` that a clientside callback turns into the graph's.
+    A chart drawn with Plotly cannot use the theme's colors as they are (`series_color` is a CSS variable, which Plotly drops).
+    Name them in the figure as `series_color(...)`, or `series_color(...)/0.12` for one at an opacity, and the figure's colors (any `color`, `fillcolor`, `gridcolor` or `linecolor`, which may also be a variable such as `var(--mantine-color-text)`) are resolved in the browser, in the theme's current color scheme and again when it changes, so a run is the color it is in every other chart.
+    `plotly_colors.js` resolves them, served once per app by `_plotly_colors.serve_plotly_colors(app)` from each chart's `plug()`; `series_band_colors.js` uses it for the reference chart, which keeps its figure in a `dcc.Store` that a clientside callback turns into the graph's.
 
-  - `run_context` — what produced each run (`RunContext`), as JSON under `RUN_CONTEXT_COLUMN` on each of its rows (a
-    row of its own for a run the chart reads nothing else of). It is read for the runs the panel draws alone, since a
-    context lists every installed package.
+  - `run_context` — what produced each run (`RunContext`), as JSON under `RUN_CONTEXT_COLUMN` on each of its rows (a row of its own for a run the chart reads nothing else of).
+    It is read for the runs the panel draws alone, since a context lists every installed package.
 
-  The request also says which keys are charted already (so auto-generate does not chart them again) and is what the
-  panel's chart filter matches against (a fuzzy match on each metric and artifact key, and on the chart type), so a
-  chart type that asks for exactly what it draws is cheap to page and easy to find. A chart of every metric is found by
-  its chart type alone. Asking for the same data makes the same request, so the chart editor redraws a display-only
-  edit (a chart's height, its colors) without reading again.
-- `field_column_kinds()` — map each parameter field to the `ColumnKind` (metric/artifact/hparam)
-  that populates it, so the settings UI knows what to offer as choices.
-- `can_display_artifact(artifact) -> bool` (optional, `False` by default) — say which logged artifacts this
-  chart type can display. Auto-generating and suggesting charts give an artifact key the first built-in
-  chart type that says yes; an artifact no chart type claims simply gets no generated chart.
-- `can_display_run_context() -> bool` (optional, `False` by default) — say that this chart type, with its default
-  settings, shows what produced each run. An experiment any of whose runs recorded a context gets a chart of the first
-  built-in chart type that says yes, in a "Run context" panel, and an artifact that chart type claims is left to it
-  rather than charted on its own.
-- `fixed_table_rows(parameters, choices)` (optional, none by default) — the rows of a table setting that the chart draws
-  whether or not they are saved, by setting name and then each row's key and the label it is shown by. The image chart
-  draws every overlay logged over its picture and saves only the ones it was told to treat differently, so its Layers
-  table would be empty for a chart that draws two layers; this lists each as a row. A fixed row can be restyled but not
-  renamed or removed, since removing it would change nothing, and it starts blank, which stands for every default:
-  make the settings model leave out a row that is all defaults, so that saving what the editor lists changes nothing.
+  The request also says which keys are charted already (so auto-generate does not chart them again) and is what the panel's chart filter matches against (a fuzzy match on each metric and artifact key, and on the chart type), so a chart type that asks for exactly what it draws is cheap to page and easy to find.
+  A chart of every metric is found by its chart type alone.
+  Asking for the same data makes the same request, so the chart editor redraws a display-only edit (a chart's height, its colors) without reading again.
+- `field_column_kinds()` — map each parameter field to the `ColumnKind` (metric/artifact/hparam) that populates it, so the settings UI knows what to offer as choices.
+- `can_display_artifact(artifact) -> bool` (optional, `False` by default) — say which logged artifacts this chart type can display.
+  Auto-generating and suggesting charts give an artifact key the first built-in chart type that says yes; an artifact no chart type claims simply gets no generated chart.
+- `can_display_run_context() -> bool` (optional, `False` by default) — say that this chart type, with its default settings, shows what produced each run.
+  An experiment any of whose runs recorded a context gets a chart of the first built-in chart type that says yes, in a "Run context" panel, and an artifact that chart type claims is left to it rather than charted on its own.
+- `fixed_table_rows(parameters, choices)` (optional, none by default) — the rows of a table setting that the chart draws whether or not they are saved, by setting name and then each row's key and the label it is shown by.
+  The image chart draws every overlay logged over its picture and saves only the ones it was told to treat differently, so its Layers table would be empty for a chart that draws two layers; this lists each as a row.
+  A fixed row can be restyled but not renamed or removed, since removing it would change nothing, and it starts blank, which stands for every default: make the settings model leave out a row that is all defaults, so that saving what the editor lists changes nothing.
   `choices` says what the experiment has (`ColumnChoices`).
 
-The chart editor builds its form from the settings model, so a setting needs no code of its own to be
-editable. To keep a form with many settings readable, group them: mark a setting with a `SettingsSection` in its
-`Annotated` metadata, as `height: Annotated[int, DISPLAY_SECTION] = 300`. `DATA_SECTION` (what the chart draws, and
-where a setting with no mark goes), `DISPLAY_SECTION` and `ADVANCED_SECTION` come with `dlboard.models`, and a chart
-type may declare sections of its own, such as `SettingsSection("Tags")`. The editor shows each section as a
-collapsible group, in the order its first setting is declared, with only the ones marked `opened` (`DATA_SECTION`, and
-an image chart's Layers) expanded. A chart type whose settings are all in one section gets no groups at all, so a plugin that
-marks nothing looks the way it always did.
+The chart editor builds its form from the settings model, so a setting needs no code of its own to be editable.
+To keep a form with many settings readable, group them: mark a setting with a `SettingsSection` in its `Annotated` metadata, as `height: Annotated[int, DISPLAY_SECTION] = 300`.
+`DATA_SECTION` (what the chart draws, and where a setting with no mark goes), `DISPLAY_SECTION` and `ADVANCED_SECTION` come with `dlboard.models`, and a chart type may declare sections of its own, such as `SettingsSection("Tags")`.
+The editor shows each section as a collapsible group, in the order its first setting is declared, with only the ones marked `opened` (`DATA_SECTION`, and an image chart's Layers) expanded.
+A chart type whose settings are all in one section gets no groups at all, so a plugin that marks nothing looks the way it always did.
 
-A number setting is typed into a box. One whose value is found by trying it is better slid: mark it `Slider(step=...)`,
-as the line chart's `smoothing: Annotated[float, DISPLAY_SECTION, Slider(step=0.01)] = Field(0.0, ge=0, le=0.99)`.
-Its `ge` and `le` are the slider's ends (a slider with either missing is refused when the chart type is listed), and
-the chart is drawn again as the slider is let go, not at every step it passes.
+A number setting is typed into a box.
+One whose value is found by trying it is better slid: mark it `Slider(step=...)`, as the line chart's `smoothing: Annotated[float, DISPLAY_SECTION, Slider(step=0.01)] = Field(0.0, ge=0, le=0.99)`.
+Its `ge` and `le` are the slider's ends (a slider with either missing is refused when the chart type is listed), and the chart is drawn again as the slider is let go, not at every step it passes.
 
-A panel's or a page's **Chart settings** set a setting for all their charts at once, and the form offers every setting
-of the chart types in reach that may be set so (`ParameterField.layerable`): any Display or Advanced one, and a Data one
-only if marked `LAYERED` (the x axis of the line, bar and image charts, `x_axis: Annotated[str, LAYERED]`), since a Data
-setting says what a chart draws and one value of it for every chart would draw the same chart in each. A table, or a list
-of name patterns, never. Two chart types that name a setting alike share its field, so name a setting as the built-in
-charts do (`height`, `x_axis`, `smoothing`) where it means the same thing. A value is drawn over a chart's own only if
-the chart's settings model takes it (`ChartInstance.drawn_with`), and never saved into the chart: a chart type sees the
-settings it is drawn with in `render` and `data_request`, as it always did, and needs no code for any of this. So refuse
-in a `model_validator` any combination your chart can't draw: the line and bar charts refuse an x axis that is their own
-column, and a page drawn by `epoch` leaves its chart of `epoch` on its own x axis. A chart whose setting someone changes
-in the chart editor while its panel or page sets it is locked to its own settings, so the change is the one drawn.
+A panel's or a page's **Chart settings** set a setting for all their charts at once, and the form offers every setting of the chart types in reach that may be set so (`ParameterField.layerable`): any Display or Advanced one, and a Data one only if marked `LAYERED` (the x axis of the line, bar and image charts, `x_axis: Annotated[str, LAYERED]`), since a Data setting says what a chart draws and one value of it for every chart would draw the same chart in each.
+A table, or a list of name patterns, never.
+Two chart types that name a setting alike share its field, so name a setting as the built-in charts do (`height`, `x_axis`, `smoothing`) where it means the same thing.
+A value is drawn over a chart's own only if the chart's settings model takes it (`ChartInstance.drawn_with`), and never saved into the chart: a chart type sees the settings it is drawn with in `render` and `data_request`, as it always did, and needs no code for any of this.
+So refuse in a `model_validator` any combination your chart can't draw: the line and bar charts refuse an x axis that is their own column, and a page drawn by `epoch` leaves its chart of `epoch` on its own x axis.
+A chart whose setting someone changes in the chart editor while its panel or page sets it is locked to its own settings, so the change is the one drawn.
 
-`plug(app)` registers the class and, if the chart needs its own clientside JS (a tooltip
-formatter, say), serves it from a route this plugin owns:
+`plug(app)` registers the class and, if the chart needs its own clientside JS (a tooltip formatter, say), serves it from a route this plugin owns:
 
 ```python
 def plug(app: Dash) -> None:
@@ -355,18 +243,10 @@ def plug(app: Dash) -> None:
     serve_asset(app, AssetKind.SCRIPT, _JS_PATH.name, _JS_PATH.read_bytes())
 ```
 
-Always pass `allow_override=True` — the composed app can get built more than once in a process
-(tests do this legitimately), and `ChartTypeRegistry.register` raises on a second registration of
-the same name unless told it's expected. `line_chart.py`/`bar_chart.py`/`table_chart.py`/
-`image_series.py` are all consistent about this; follow their lead. Register in `plug()` and nowhere else: a
-registration at module level would offer the chart in every deployment that merely imports your module, whether or not
-it lists your plugin.
+Always pass `allow_override=True` — the composed app can get built more than once in a process (tests do this legitimately), and `ChartTypeRegistry.register` raises on a second registration of the same name unless told it's expected.
+`line_chart.py`/`bar_chart.py`/`table_chart.py`/ `image_series.py` are all consistent about this; follow their lead.
+Register in `plug()` and nowhere else: a registration at module level would offer the chart in every deployment that merely imports your module, whether or not it lists your plugin.
 
-If your chart needs its own browser-side JS, keep the `.js` file next to the chart module and
-serve/register it from `plug()` yourself, the way `bar_chart.py`/`line_chart.py` do for their
-tooltip formatters — never drop it in a shared `assets/` folder or use Dash's global
-`hooks.route`/`hooks.script` registry, both of which leak across every `Dash` app built in the same
-process, not just the one that owns the file.
+If your chart needs its own browser-side JS, keep the `.js` file next to the chart module and serve/register it from `plug()` yourself, the way `bar_chart.py`/`line_chart.py` do for their tooltip formatters — never drop it in a shared `assets/` folder or use Dash's global `hooks.route`/`hooks.script` registry, both of which leak across every `Dash` app built in the same process, not just the one that owns the file.
 
-`bar_chart.py` is a good mid-sized reference: one settings model, one JS tooltip asset, grouping
-logic shared from `_grouping.py`.
+`bar_chart.py` is a good mid-sized reference: one settings model, one JS tooltip asset, grouping logic shared from `_grouping.py`.

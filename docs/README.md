@@ -1,11 +1,11 @@
 # Documentation
 
-Every page, grouped by what you're doing. If you're new, read the first two.
+Every page, grouped by what you're doing.
+If you're new, read the first two.
 
 ## Start here
 
-- [Architecture](architecture.md) — how dlboard fits together: the plugin system, and the request flow from a training
-  script to the browser.
+- [Architecture](architecture.md) — how dlboard fits together: the plugin system, and the request flow from a training script to the browser.
 - [Client & logging](client.md) — `DLBoardLogger`, the REST client, and how to log a new kind of artifact.
 
 ## Run it
@@ -23,18 +23,15 @@ Install, configure and deploy a server.
 
 Day-to-day use and upkeep.
 
-- [Runs, pins & comparisons](comparisons.md) — the run list, flagging the runs that matter, and comparing runs of
-  several experiments.
+- [Runs, pins & comparisons](comparisons.md) — the run list, flagging the runs that matter, and comparing runs of several experiments.
 - [Retention](retention.md) — how many runs, or how old, a project keeps, kept runs, and when the Trash is emptied.
-- [Background tasks](background-tasks.md) — the custodian process, running several servers, watching it, and writing a
-  task.
+- [Background tasks](background-tasks.md) — the custodian process, running several servers, watching it, and writing a task.
 - [Telemetry](telemetry.md) — Prometheus and OpenTelemetry metrics and logs, for Grafana, Mimir and Loki.
 - [Grafana dashboards](grafana/README.md) — the dashboards dlboard ships for its metrics, traces and logs.
 
 ## Extend it
 
-Storage, auth, charts and theming are all plugins; page layout is the one deliberate exception (see
-[architecture](architecture.md)).
+Storage, auth, charts and theming are all plugins; page layout is the one deliberate exception (see [architecture](architecture.md)).
 
 - [Plugin overview](plugins/overview.md) — the plugin protocol, and how plugins are composed into a deployment.
 - [Storage](plugins/storage.md) — where projects, runs and artifacts live: Postgres, S3, or your own backend.

@@ -1,8 +1,7 @@
 # Changelog
 
-All notable changes to dlboard are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows the tiers described in
-[docs/compatibility.md](docs/compatibility.md).
+All notable changes to dlboard are documented here.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows the tiers described in [docs/compatibility.md](docs/compatibility.md).
 
 <!--
 To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fresh empty
@@ -16,110 +15,101 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
-* **The console chart wraps a long line.** A line wider than the chart wraps onto as many rows as it takes, and wraps
-  again as the chart is narrowed or widened, instead of being cut at the chart's edge; set *wrap* off and it scrolls
-  sideways as before. (#734)
-* **Plugin docs say how to act on a run ending.** `docs/background-tasks.md` shows how a plugin's task finds the runs
-  that finished, failed or were lost (there is no hook that calls it), and why `ended_at` is not a cursor.
-  `NewWorkItem`, `WorkItem` and `get_system_task_store` are exported from `dlboard.serve`. (#736)
-* **Chart settings for a panel or the whole page.** **Chart settings…** in a panel's menu, and **Chart settings** in the
-  page's toolbar, set settings for every chart there at once (smoothing, height, the x-axis, a log scale…): the form
-  offers every setting of the chart types on the panel or page, and each one ticked is drawn over every chart's own, a
-  panel's over the page's, and over any chart added later, without being saved into a chart. A setting no chart there has
-  now is kept, for one added later. With the chart filter (or the panel filter) typed, the form writes what is ticked into
-  just the charts it matches, once; it replaces **Set x-axis…**. The form says which charts it reaches, how many of each
-  type, and which settings reach only some of them. A chart can be **locked** from its card to keep its own settings; the
-  chart editor shows a chart as its panel or page draws it, and changing there a setting they set locks the chart with
-  that change. A line or bar chart is never drawn against itself: the page's x-axis of `epoch` leaves the chart of
-  `epoch` on its own, and the chart editor refuses one. A chart plugin marks a Data setting that may be set this way
-  `LAYERED`; Display and Advanced ones may be already.
-* **A slider for smoothing.** A line chart's smoothing is slid from off to the most there is, not typed; a chart
-  plugin marks any bounded number setting `Slider(step=...)` for one.
+* **The console chart wraps a long line.** A line wider than the chart wraps onto as many rows as it takes, and wraps again as the chart is narrowed or widened, instead of being cut at the chart's edge; set *wrap* off and it scrolls sideways as before.
+  (#734)
+* **Plugin docs say how to act on a run ending.** `docs/background-tasks.md` shows how a plugin's task finds the runs that finished, failed or were lost (there is no hook that calls it), and why `ended_at` is not a cursor.
+  `NewWorkItem`, `WorkItem` and `get_system_task_store` are exported from `dlboard.serve`.
+  (#736)
+* **Chart settings for a panel or the whole page.** **Chart settings…** in a panel's menu, and **Chart settings** in the page's toolbar, set settings for every chart there at once (smoothing, height, the x-axis, a log scale…): the form offers every setting of the chart types on the panel or page, and each one ticked is drawn over every chart's own, a panel's over the page's, and over any chart added later, without being saved into a chart.
+  A setting no chart there has now is kept, for one added later.
+  With the chart filter (or the panel filter) typed, the form writes what is ticked into just the charts it matches, once; it replaces **Set x-axis…**.
+  The form says which charts it reaches, how many of each type, and which settings reach only some of them.
+  A chart can be **locked** from its card to keep its own settings; the chart editor shows a chart as its panel or page draws it, and changing there a setting they set locks the chart with that change.
+  A line or bar chart is never drawn against itself: the page's x-axis of `epoch` leaves the chart of `epoch` on its own, and the chart editor refuses one.
+  A chart plugin marks a Data setting that may be set this way `LAYERED`; Display and Advanced ones may be already.
+* **A slider for smoothing.** A line chart's smoothing is slid from off to the most there is, not typed; a chart plugin marks any bounded number setting `Slider(step=...)` for one.
 
 ### Changed
 
-* **A view says whether it is private, and a switch shares it.** The owner of a view (or a comparison) has a
-  **Private / Shared** switch in its header, with a tooltip saying what each means, in place of the "Share with
-  project" item of its ⋯ menu that nobody found.
-* **The console chart's run picker lists the newest run first, in its colours.** The runs are in the Runs table's
-  order, each drawn with the colour and dash it has on the page's other charts, and the newest is the one opened.
-* **An edit that makes a view of your own asks whether to keep it.** Editing a page that isn't yours (the shared page,
-  or someone else's view) still saves the change to a new view of your own, and now says so in a dialog, with **Keep my
-  view** or **Undo**, which deletes the new view and goes back to the one you were on, instead of a toast. Even hiding
-  a run did this, and the views piled up unnoticed. (#735)
+* **A view says whether it is private, and a switch shares it.** The owner of a view (or a comparison) has a **Private / Shared** switch in its header, with a tooltip saying what each means, in place of the "Share with project" item of its ⋯ menu that nobody found.
+* **The console chart's run picker lists the newest run first, in its colours.** The runs are in the Runs table's order, each drawn with the colour and dash it has on the page's other charts, and the newest is the one opened.
+* **An edit that makes a view of your own asks whether to keep it.** Editing a page that isn't yours (the shared page, or someone else's view) still saves the change to a new view of your own, and now says so in a dialog, with **Keep my view** or **Undo**, which deletes the new view and goes back to the one you were on, instead of a toast.
+  Even hiding a run did this, and the views piled up unnoticed.
+  (#735)
 
 ### Fixed
 
-* **A run's console has what Lightning logs.** A logging handler made before the run (Lightning's, made as it is
-  imported, or `logging.basicConfig`'s) wrote past the capture: without `rich`, the model summary and "GPU available"
-  were missing. It is captured now, and given its stream back when the run ends. (#733)
-* **Rich's progress bars are kept once in a run's console.** Lightning's `RichProgressBar` draws its training and
-  validation bars again by going back up over them, and every drawing was kept, about ten lines a second, burying what
-  was printed before them. Each chunk now keeps them as they last looked. A chunk also ends at a line end, so a line is
-  never split between two, and the capture limit never cuts a character in half. (#734)
-* **Newer opens a console chunk where reading goes on.** Read newest first, Newer opened the next chunk at its top,
-  while what followed the chunk you were reading was at its end; it now opens there (and so does Older, read oldest
-  first). (#734)
+* **A run's console has what Lightning logs.** A logging handler made before the run (Lightning's, made as it is imported, or `logging.basicConfig`'s) wrote past the capture: without `rich`, the model summary and "GPU available" were missing.
+  It is captured now, and given its stream back when the run ends.
+  (#733)
+* **Rich's progress bars are kept once in a run's console.** Lightning's `RichProgressBar` draws its training and validation bars again by going back up over them, and every drawing was kept, about ten lines a second, burying what was printed before them.
+  Each chunk now keeps them as they last looked.
+  A chunk also ends at a line end, so a line is never split between two, and the capture limit never cuts a character in half.
+  (#734)
+* **Newer opens a console chunk where reading goes on.** Read newest first, Newer opened the next chunk at its top, while what followed the chunk you were reading was at its end; it now opens there (and so does Older, read oldest first).
+  (#734)
 
 ## [0.19.1] - 2026-11-19
 
 ### Added
 
-* **A chart of what produced each run.** The `run_context` chart lists each run's commit, command, machine and
-  packages, a row per fact and a column per run, filtered by section or to what the runs differ in, with each run's
-  `git.diff` linked under it. Auto-generate gives an experiment whose runs recorded a context one in a *Run context*
-  panel, and Suggest charts offers it, in place of the file list of `context/` that said nothing was logged for runs
-  with no diff. A chart type says it can show the runs' context with `ChartType.can_display_run_context`, and asks for it
-  with `DataRequest.run_context`.
-* **The console chart reads newest first or oldest first.** Newest first (the default) opens on each run's newest chunk
-  with its latest line at the top; oldest first opens on the first chunk, as printed. Its pager says which chunk is on
-  show (*Chunk 3 of 40*) and jumps to the oldest or newest as well as a chunk back or on.
+* **A chart of what produced each run.** The `run_context` chart lists each run's commit, command, machine and packages, a row per fact and a column per run, filtered by section or to what the runs differ in, with each run's `git.diff` linked under it.
+  Auto-generate gives an experiment whose runs recorded a context one in a *Run context* panel, and Suggest charts offers it, in place of the file list of `context/` that said nothing was logged for runs with no diff.
+  A chart type says it can show the runs' context with `ChartType.can_display_run_context`, and asks for it with `DataRequest.run_context`.
+* **The console chart reads newest first or oldest first.** Newest first (the default) opens on each run's newest chunk with its latest line at the top; oldest first opens on the first chunk, as printed.
+  Its pager says which chunk is on show (*Chunk 3 of 40*) and jumps to the oldest or newest as well as a chunk back or on.
 
 ### Fixed
 
-* **The console chart draws a long chunk quickly, in its colours, and fills its cell.** Only the lines in view are in
-  the page, ANSI colours are drawn rather than shown as escapes, a progress bar's redraws (`\r`) collapse to the last
-  one, and in a grid the chart fills its cell instead of keeping its own width. (#726)
+* **The console chart draws a long chunk quickly, in its colours, and fills its cell.** Only the lines in view are in the page, ANSI colours are drawn rather than shown as escapes, a progress bar's redraws (`\r`) collapse to the last one, and in a grid the chart fills its cell instead of keeping its own width.
+  (#726)
 
 ## [0.19.0] - 2026-11-19
 
 ### Added
 
-* **Log from any training loop.** `dlboard.client.run.init(project, experiment, hparams=...)` starts a run from plain
-  PyTorch, the HF `Trainer`, JAX or anything else, as a context manager that ends the run as its block does.
-  `DLBoardLogger` is now a thin Lightning adapter over the same run. (#692)
-* **A run records what produced it:** its git commit, branch, remote and whether it had uncommitted changes, the command
-  line, installed packages and machine. They're shown as Context rows in Diff, and set with `DLBOARD_CONTEXT_*`. The
-  changes themselves are uploaded as a diff artifact only with `DLBOARD_CONTEXT_DIFF=true`, since they can hold
-  secrets. (#693)
-* **System metrics.** With the `system` extra (psutil) a run samples CPU and memory, and with the `gpu` extra (NVML) its
-  own GPUs, into `system/` keys charted against time. Sampling goes through a private OpenTelemetry meter, so it never
-  touches the script's own telemetry. Set with `DLBOARD_SYSTEM_METRICS_*`. (#694)
-* **Smoothing and a log scale for line charts.** The tooltip still shows the raw value. (#695)
-* **A run whose process died is given up as lost** instead of running forever. A client heartbeat and its batches keep a
-  run heard from, and a background task marks quiet ones lost, with a tooltip that says so. (#696)
-* **Console output.** A run captures what the script prints, in chunks, and the new `console` chart shows it beside the
-  charts. Set with `DLBOARD_CONSOLE_*`. (#697)
-* **Scatter and parallel-coordinates charts** that relate a sweep's hyperparameters to its metrics. (#698)
-* **Group a line chart's runs by a hyperparameter:** a mean and a min–max band per value, up to `max_groups`. (#699)
-* **Run tags.** A project's labels on its runs, shared by everyone in it. A script sets them at launch
-  (`init(..., tags=[...])`), and an editor sets them from every run list's bar, which offers the project's tags as you
-  type. A run's tags follow its name, and the Run column's filter, a chart's run picker and `get_runs(tags=...)` find
-  runs by them. (#700)
-* **Read what was logged back out.** Paged REST reads, with client methods, of projects, experiments, runs, keys,
-  hyperparameters, a run's summary, a series and artifacts. Every read is one page, capped by the server and sought from a
-  cursor, so the last page of a long series costs what the first does. `pages()` walks them, and
-  `series_frame(..., max_rows=)` reads into pandas and says when it stopped short. (#701)
-* **Import a TensorBoard logdir:** `dlboard import tensorboard LOGDIR --project P [--watch S]`. It needs neither
-  TensorFlow nor the `tensorboard` package, and it's incremental, so it can follow runs still writing.
-  `serve local --tensorboard-logdir` does the same as it serves. (#702, #703)
+* **Log from any training loop.** `dlboard.client.run.init(project, experiment, hparams=...)` starts a run from plain PyTorch, the HF `Trainer`, JAX or anything else, as a context manager that ends the run as its block does.
+  `DLBoardLogger` is now a thin Lightning adapter over the same run.
+  (#692)
+* **A run records what produced it:** its git commit, branch, remote and whether it had uncommitted changes, the command line, installed packages and machine.
+  They're shown as Context rows in Diff, and set with `DLBOARD_CONTEXT_*`.
+  The changes themselves are uploaded as a diff artifact only with `DLBOARD_CONTEXT_DIFF=true`, since they can hold secrets.
+  (#693)
+* **System metrics.** With the `system` extra (psutil) a run samples CPU and memory, and with the `gpu` extra (NVML) its own GPUs, into `system/` keys charted against time.
+  Sampling goes through a private OpenTelemetry meter, so it never touches the script's own telemetry.
+  Set with `DLBOARD_SYSTEM_METRICS_*`.
+  (#694)
+* **Smoothing and a log scale for line charts.** The tooltip still shows the raw value.
+  (#695)
+* **A run whose process died is given up as lost** instead of running forever.
+  A client heartbeat and its batches keep a run heard from, and a background task marks quiet ones lost, with a tooltip that says so.
+  (#696)
+* **Console output.** A run captures what the script prints, in chunks, and the new `console` chart shows it beside the charts.
+  Set with `DLBOARD_CONSOLE_*`.
+  (#697)
+* **Scatter and parallel-coordinates charts** that relate a sweep's hyperparameters to its metrics.
+  (#698)
+* **Group a line chart's runs by a hyperparameter:** a mean and a min–max band per value, up to `max_groups`.
+  (#699)
+* **Run tags.** A project's labels on its runs, shared by everyone in it.
+  A script sets them at launch (`init(..., tags=[...])`), and an editor sets them from every run list's bar, which offers the project's tags as you type.
+  A run's tags follow its name, and the Run column's filter, a chart's run picker and `get_runs(tags=...)` find runs by them.
+  (#700)
+* **Read what was logged back out.** Paged REST reads, with client methods, of projects, experiments, runs, keys, hyperparameters, a run's summary, a series and artifacts.
+  Every read is one page, capped by the server and sought from a cursor, so the last page of a long series costs what the first does.
+  `pages()` walks them, and `series_frame(..., max_rows=)` reads into pandas and says when it stopped short.
+  (#701)
+* **Import a TensorBoard logdir:** `dlboard import tensorboard LOGDIR --project P [--watch S]`.
+  It needs neither TensorFlow nor the `tensorboard` package, and it's incremental, so it can follow runs still writing.
+  `serve local --tensorboard-logdir` does the same as it serves.
+  (#702, #703)
 * **Offline mode.** With `DLBOARD_OFFLINE_DIR` (or a `file://` server URL) a run logs to a folder with no server.
-  `dlboard serve local --logdir` opens it, and `dlboard sync DIR --server URL` sends it to a shared server, both
-  incrementally. (#703)
-* **Run tokens for cluster jobs.** `dlboard run-token --project P` (or `dlboard.client.run.run_token("P")` from Python, a
-  Bazel rule or a launcher) starts a run and mints a `dlr_...` token that logs to it alone. A job carries the token as
-  `DLBOARD_API_KEY` instead of your own, and its `init`/`DLBoardLogger` logs to that run. The token can't read anything, touch another run or mint more, and it expires after
-  `DLBOARD_RUN_TOKEN_LIFETIME_HOURS` (a week). (#718)
+  `dlboard serve local --logdir` opens it, and `dlboard sync DIR --server URL` sends it to a shared server, both incrementally.
+  (#703)
+* **Run tokens for cluster jobs.** `dlboard run-token --project P` (or `dlboard.client.run.run_token("P")` from Python, a Bazel rule or a launcher) starts a run and mints a `dlr_...` token that logs to it alone.
+  A job carries the token as `DLBOARD_API_KEY` instead of your own, and its `init`/`DLBoardLogger` logs to that run.
+  The token can't read anything, touch another run or mint more, and it expires after `DLBOARD_RUN_TOKEN_LIFETIME_HOURS` (a week).
+  (#718)
 
 ### Changed
 
@@ -129,425 +119,353 @@ pulls that section's body into the GitHub release notes and publishes both distr
   * `tag_runs`/`untag_runs`/`run_tags`/`search_tags` (#700);
   * `metric_series`/`artifact_series`, plus `get_runs`' new `tags=` and `before=` (#701).
 
-  It also stores `NewApiToken.run_id`, and leaves run tokens out of `list_api_tokens` (#718). Migrations 0012–0015 add
-  their tables and columns, additively.
+  It also stores `NewApiToken.run_id`, and leaves run tokens out of `list_api_tokens` (#718).
+  Migrations 0012–0015 add their tables and columns, additively.
 
 ## [0.18.0] - 2026-11-17
 
 ### Changed
 
-* **Plugins: three `DataStore` methods, and setting checks that see deletes.** `create_project` takes an `owner_id`, whose
-  `OWNER` grant it makes in the same transaction; `get_or_create_owned_project(project, owner_id)` finds or makes one
-  person's project of a name under a lock on them; `add_password_credential(credential)` sets a password only if the
-  user has none, and says whether it did. A `SettingRule`'s `check` is asked about deletes too, with
-  `SettingWrite.value` of `None` (return `None` to allow it). A `DataStore` of a plugin's own implements the new
-  methods. (#677)
+* **Plugins: three `DataStore` methods, and setting checks that see deletes.** `create_project` takes an `owner_id`, whose `OWNER` grant it makes in the same transaction; `get_or_create_owned_project(project, owner_id)` finds or makes one person's project of a name under a lock on them; `add_password_credential(credential)` sets a password only if the user has none, and says whether it did.
+  A `SettingRule`'s `check` is asked about deletes too, with `SettingWrite.value` of `None` (return `None` to allow it).
+  A `DataStore` of a plugin's own implements the new methods.
+  (#677)
 
 ### Fixed
 
-* **Retention's check no longer fails with "too many values to unpack".** A claim of background work for one item could
-  come back with two on Postgres, when its plan ran the pick again with other rows locked by a racing claimer; a claim
-  now picks its items exactly once. (#674)
-* **A person's jobs that start at once with a new project name share one project,** rather than each making one and
-  leaving the name ambiguous for them from then on. A project is never left without its owner's grant, a signup never
-  replaces the password of an account another signup has just taken, and a setting only the server may write cannot be
-  deleted either. (#677)
-* **A bad value in a link costs only itself.** A truncated or hand-edited value in a page's URL reset every other: a
-  comparison drew again the runs its viewer had hidden, and lost its focus, tab and open panels. Only that value falls
-  back to its default now. (#679)
-* **Pages say why something they were asked to do did not happen.** A token made on the account page is listed at once
-  (and a double-click makes one); revoking one asks first. Renaming or sharing a view since deleted, a picture too large to
-  download, a link the browser would not copy, and a line chart whose date axis has no dates to place each say so rather
-  than doing nothing. A double-click posts a note once. A cached picture in the enlarged view no longer flashes a spinner
-  on a busy machine. (#676, #680, #681)
-* **Nothing is logged to a run deleted while its batch was being written,** where the artifacts of one could stay
-  readable until a purge. `/readyz` costs the same however many projects there are. Deleting many runs never fails part-way
-  with some batches deleted. (#678)
-* **A background task's run ends with its work.** The rest the duty cycle asks for came after every batch, the last one
-  included, so a run went on holding its lease, and what it asked for next (retention's checks, after scheduling them),
-  for three times as long as its last batch took, with nothing left to do. A task now rests before its next batch, and the
-  rest is a `dlboard.custodian.rest` span where a trace showed only a gap. (#684)
-* **The last of the hardening audit's smaller fixes.** A bar chart's date axis groups only the values that are dates, in
-  date order, and says so when none is, where one that was not left them all sorted as text. A picture's legend strikes
-  out a layer that did not load, saying so on hover, and a downloaded picture's legend leaves it out. A grid panel's
-  column field, once cleared and left, shows the panel's column count again. The admin page keeps its tab in its
-  address, so a reload or a link opens on it. Deleting a note asks first. (#685, #686, #687, #688, #689)
+* **Retention's check no longer fails with "too many values to unpack".** A claim of background work for one item could come back with two on Postgres, when its plan ran the pick again with other rows locked by a racing claimer; a claim now picks its items exactly once.
+  (#674)
+* **A person's jobs that start at once with a new project name share one project,** rather than each making one and leaving the name ambiguous for them from then on.
+  A project is never left without its owner's grant, a signup never replaces the password of an account another signup has just taken, and a setting only the server may write cannot be deleted either.
+  (#677)
+* **A bad value in a link costs only itself.** A truncated or hand-edited value in a page's URL reset every other: a comparison drew again the runs its viewer had hidden, and lost its focus, tab and open panels.
+  Only that value falls back to its default now.
+  (#679)
+* **Pages say why something they were asked to do did not happen.** A token made on the account page is listed at once (and a double-click makes one); revoking one asks first.
+  Renaming or sharing a view since deleted, a picture too large to download, a link the browser would not copy, and a line chart whose date axis has no dates to place each say so rather than doing nothing.
+  A double-click posts a note once.
+  A cached picture in the enlarged view no longer flashes a spinner on a busy machine.
+  (#676, #680, #681)
+* **Nothing is logged to a run deleted while its batch was being written,** where the artifacts of one could stay readable until a purge.
+  `/readyz` costs the same however many projects there are.
+  Deleting many runs never fails part-way with some batches deleted.
+  (#678)
+* **A background task's run ends with its work.** The rest the duty cycle asks for came after every batch, the last one included, so a run went on holding its lease, and what it asked for next (retention's checks, after scheduling them), for three times as long as its last batch took, with nothing left to do.
+  A task now rests before its next batch, and the rest is a `dlboard.custodian.rest` span where a trace showed only a gap.
+  (#684)
+* **The last of the hardening audit's smaller fixes.** A bar chart's date axis groups only the values that are dates, in date order, and says so when none is, where one that was not left them all sorted as text.
+  A picture's legend strikes out a layer that did not load, saying so on hover, and a downloaded picture's legend leaves it out.
+  A grid panel's column field, once cleared and left, shows the panel's column count again.
+  The admin page keeps its tab in its address, so a reload or a link opens on it.
+  Deleting a note asks first.
+  (#685, #686, #687, #688, #689)
 
-* **The logger's shipping no longer stalls, fails training, or hangs at the end of a run.** A metric that diverged to NaN
-  or infinity stopped every metric after it from shipping for the rest of the run; it is recorded as it is. A batch with
-  one bad item in it (an artifact whose file was deleted before it shipped) was retried forever, holding up everything
-  after it, and a batch the server refused was dropped whole for one bad item: now only the bad item is dropped, and
-  `finalize()` warns how many were. A shipping process that died made the next `log_*` call raise, ending training; it is
-  started again, with a warning. `finalize()` waits at most 60 seconds however long the server is down (it could block
-  for half an hour), and keeps checkpoints `log_model` copied until they have shipped. A logger nothing uses any more
-  (one per trial of a sweep) no longer keeps its two processes until the script exits. (#662)
-* **The server answers what can never be logged with a 4xx, so a client stops resending it.** Metrics or artifacts for a
-  run that was deleted (retention deletes runs still running past its grace period) were a 500, which a client retried
-  forever; they are a 404. An artifact batch sent again after it failed partway, or after its answer was lost, is
-  accepted and recorded once: it used to fail for good on what had landed, or record it twice. Logging the same key, step
-  and file name again keeps the first. (#663)
-* **Writes that race no longer duplicate or undo one another.** The workers of a sweep that start at once share one
-  experiment instead of creating one each; processes sharing a run keep its first hyperparameters (and the logger warns
-  when it logs others that were not kept); adding runs to a comparison no longer fails with "database is locked" while
-  something is training (SQLite). An edit read before a delete no longer brings the project back, a password change or
-  an edit no longer undoes an admin's disable or a "sign out everywhere", and a restore that a purge overtook no longer
-  reports success. A purge that failed is retried rather than taken for one that was restored. (#665)
-* **A signup is never live before it is approved, and never takes over an account.** Under `signup=approval` an account
-  could be left enabled by a failure halfway through creating it, and two signups for one new name could leave the second
-  person's password on the first person's account. The sign-in throttle no longer keeps an entry, in every worker, for
-  each username anyone tries. `DLBOARD_PASSWORD_MIN_LENGTH` and `DLBOARD_SESSION_LIFETIME_HOURS` must be positive. (#668)
-* **The experiment page says when an edit didn't land, or a chart is stale.** A chart that failed to redraw while live
-  updates were on showed "Live" again a tick later while it stayed stale; it is tried again, and the badge says so
-  meanwhile. Saving the chart editor after another tab reordered or deleted charts no longer overwrites a different chart,
-  or loses a chart added to a panel since renamed: it says the chart is no longer on the page. An edit that changes
-  nothing no longer forks a view of your own. The admin page says why a restore, purge or change to a user was refused
-  rather than reloading as if it had happened. (#669)
-* **The retention section's preview says why a rule is no rule, and when saving one drops the experiments' own rules**
-  (changing the project's limit from a run count to an age, or the reverse). `DLBOARD_LOG_LEVEL` is checked at startup. A
-  `file:///` link to the filesystem store's own root is refused, rather than becoming a blob a purge could never delete.
+* **The logger's shipping no longer stalls, fails training, or hangs at the end of a run.** A metric that diverged to NaN or infinity stopped every metric after it from shipping for the rest of the run; it is recorded as it is.
+  A batch with one bad item in it (an artifact whose file was deleted before it shipped) was retried forever, holding up everything after it, and a batch the server refused was dropped whole for one bad item: now only the bad item is dropped, and `finalize()` warns how many were.
+  A shipping process that died made the next `log_*` call raise, ending training; it is started again, with a warning.
+  `finalize()` waits at most 60 seconds however long the server is down (it could block for half an hour), and keeps checkpoints `log_model` copied until they have shipped.
+  A logger nothing uses any more (one per trial of a sweep) no longer keeps its two processes until the script exits.
+  (#662)
+* **The server answers what can never be logged with a 4xx, so a client stops resending it.** Metrics or artifacts for a run that was deleted (retention deletes runs still running past its grace period) were a 500, which a client retried forever; they are a 404.
+  An artifact batch sent again after it failed partway, or after its answer was lost, is accepted and recorded once: it used to fail for good on what had landed, or record it twice.
+  Logging the same key, step and file name again keeps the first.
+  (#663)
+* **Writes that race no longer duplicate or undo one another.** The workers of a sweep that start at once share one experiment instead of creating one each; processes sharing a run keep its first hyperparameters (and the logger warns when it logs others that were not kept); adding runs to a comparison no longer fails with "database is locked" while something is training (SQLite).
+  An edit read before a delete no longer brings the project back, a password change or an edit no longer undoes an admin's disable or a "sign out everywhere", and a restore that a purge overtook no longer reports success.
+  A purge that failed is retried rather than taken for one that was restored.
+  (#665)
+* **A signup is never live before it is approved, and never takes over an account.** Under `signup=approval` an account could be left enabled by a failure halfway through creating it, and two signups for one new name could leave the second person's password on the first person's account.
+  The sign-in throttle no longer keeps an entry, in every worker, for each username anyone tries.
+  `DLBOARD_PASSWORD_MIN_LENGTH` and `DLBOARD_SESSION_LIFETIME_HOURS` must be positive.
+  (#668)
+* **The experiment page says when an edit didn't land, or a chart is stale.** A chart that failed to redraw while live updates were on showed "Live" again a tick later while it stayed stale; it is tried again, and the badge says so meanwhile.
+  Saving the chart editor after another tab reordered or deleted charts no longer overwrites a different chart, or loses a chart added to a panel since renamed: it says the chart is no longer on the page.
+  An edit that changes nothing no longer forks a view of your own.
+  The admin page says why a restore, purge or change to a user was refused rather than reloading as if it had happened.
+  (#669)
+* **The retention section's preview says why a rule is no rule, and when saving one drops the experiments' own rules** (changing the project's limit from a run count to an age, or the reverse).
+  `DLBOARD_LOG_LEVEL` is checked at startup.
+  A `file:///` link to the filesystem store's own root is refused, rather than becoming a blob a purge could never delete.
   (#671)
 
-* **An uploaded artifact is never lost once the server has answered for it.** An upload is answered once it is in the
-  staging directory, and the server then writes it and records its ref however its processes die: a write the object store
-  refuses is tried again (S3 used to delete the upload on a failed write), a blob writer that dies is started again with
-  everything its worker held, and the uploads of a worker or server that died are finished by the next process to start
-  on the same staging directory, never recorded twice. A worker holding `*_QUEUE_SIZE` unwritten uploads turns more away
-  with a 503, so an object store that is down no longer fills the disk. S3 deployments stage uploads in the new
-  `DLBOARD_S3_STAGING_DIR` (`.dlboard/s3-staging`; `/data/s3-staging` in the image) rather than the system temp
-  directory: keep it on persistent storage. Plugins: `plug_blob_store` and `BlobArtifactStore` take a `staging_dir`, and
-  `BlobBackend.write` must leave its staged file when it fails. New metric: `dlboard.artifact.writer.restarts`. (#658)
-* **Nothing left in the staging directory keeps a worker from finishing uploads.** A blob writer killed while the
-  database was slow to take its results could leave the writer started after it unable to hand any back, so its worker
-  turned uploads away until it was recycled: each writer now gets its own results queue. A writer that could not be
-  started again at once (short of memory, say) was never tried again; now it is. A worker takes over no more of a dead
-  one's uploads than its `*_QUEUE_SIZE`, so a backlog is shared out instead of one worker opening a file for every
-  upload. An entry a crash cut short is deleted rather than logged every 30 seconds forever (one a newer version wrote is
-  kept for it, after a rollback), and the staging directory is swept hourly, not only at startup. Staging directories
-  shared by several hosts need locks that work across hosts (see `docs/plugins/storage.md`). New metric:
-  `dlboard.artifact.uploads.held`. (#659)
+* **An uploaded artifact is never lost once the server has answered for it.** An upload is answered once it is in the staging directory, and the server then writes it and records its ref however its processes die: a write the object store refuses is tried again (S3 used to delete the upload on a failed write), a blob writer that dies is started again with everything its worker held, and the uploads of a worker or server that died are finished by the next process to start on the same staging directory, never recorded twice.
+  A worker holding `*_QUEUE_SIZE` unwritten uploads turns more away with a 503, so an object store that is down no longer fills the disk.
+  S3 deployments stage uploads in the new `DLBOARD_S3_STAGING_DIR` (`.dlboard/s3-staging`; `/data/s3-staging` in the image) rather than the system temp directory: keep it on persistent storage.
+  Plugins: `plug_blob_store` and `BlobArtifactStore` take a `staging_dir`, and `BlobBackend.write` must leave its staged file when it fails.
+  New metric: `dlboard.artifact.writer.restarts`.
+  (#658)
+* **Nothing left in the staging directory keeps a worker from finishing uploads.** A blob writer killed while the database was slow to take its results could leave the writer started after it unable to hand any back, so its worker turned uploads away until it was recycled: each writer now gets its own results queue.
+  A writer that could not be started again at once (short of memory, say) was never tried again; now it is.
+  A worker takes over no more of a dead one's uploads than its `*_QUEUE_SIZE`, so a backlog is shared out instead of one worker opening a file for every upload.
+  An entry a crash cut short is deleted rather than logged every 30 seconds forever (one a newer version wrote is kept for it, after a rollback), and the staging directory is swept hourly, not only at startup.
+  Staging directories shared by several hosts need locks that work across hosts (see `docs/plugins/storage.md`).
+  New metric: `dlboard.artifact.uploads.held`.
+  (#659)
 
-* **Runs that share a colour are told apart by their dash.** The palette has eight colours, so runs eight apart (a
-  comparison's runs of two experiments, an experiment page's newest twenty) were drawn alike. A run is now drawn solid,
-  dashed, dotted or dash-dotted as well, chosen from its id like its colour, so it looks the same on every page, whatever
-  is drawn beside it. Line, band and combined Plotly charts dash its line, and the run table, captions and the line
-  chart's tooltip label a run with a short line in its colour and dash rather than a dot. Bars, and the line chart's
-  legend, still show colour alone. Plugins: `dlboard.serve.series_dash` and `SeriesDash`. (#500)
+* **Runs that share a colour are told apart by their dash.** The palette has eight colours, so runs eight apart (a comparison's runs of two experiments, an experiment page's newest twenty) were drawn alike.
+  A run is now drawn solid, dashed, dotted or dash-dotted as well, chosen from its id like its colour, so it looks the same on every page, whatever is drawn beside it.
+  Line, band and combined Plotly charts dash its line, and the run table, captions and the line chart's tooltip label a run with a short line in its colour and dash rather than a dot.
+  Bars, and the line chart's legend, still show colour alone.
+  Plugins: `dlboard.serve.series_dash` and `SeriesDash`.
+  (#500)
 
 ## [0.17.0] - 2026-11-14
 
 ### Added
 
-* **Log Plotly figures, drawn as the interactive figures they are.** `PlotlyFigure` logs any Plotly figure (or a dict
-  of one; the client does not depend on plotly), and the new `plotly` chart draws it in the browser with Plotly's own
-  hover, zoom and legend, in the page's colors: a figure at each step gets a slider that keeps your zoom as it moves, a
-  figure logged once is drawn as it is, and each run gets a figure of its own or, with `combine_runs`, every run's
-  traces are drawn in one. A figure logged with `bind` is a template that the data streamed into it at each step
-  (`PlotlyData`: a trajectory's points, a heatmap's rows, any array) is drawn into, every step's, the latest step's, or
-  one step at a time.
-* **A Plotly template can draw the metrics a run already logs.** Bind a trace's attribute to `metric("train/loss")` (or
-  `metric("step")`) in place of a `PlotlyData` column, and the chart reads the metric with the template, sampled as a
-  line chart's is; auto-generate fills in the chart's new `metrics` setting from the template. (#620)
-* **A synced panel moves its Plotly and image charts' step sliders together,** so a prediction's picture and its PR
-  curve stay at the same step. (#621)
-* **A page loads nothing a logged figure names on other servers, unless the deployment allows it.** Every page's
-  Content-Security-Policy lets it load pictures, media, fonts and data from dlboard alone, so the browser refuses a
-  figure's pictures by URL, GeoJSON by URL, map styles and tiles, and whoever can log to a project cannot make the browser
-  of everyone who opens its charts request a URL of their choosing. `DLBOARD_PLOTLY_REMOTE_RESOURCES` lifts it;
-  `DLBOARD_PLOTLY_MAP_TILES` names a tile server maps are drawn on meanwhile. The S3 store in `presign` mode lets in its
-  bucket, and a plugin can let in what its deployment needs (`dlboard.serve.allow_resources_from`). (#622)
-* **Traces, metrics and logs over OTLP/gRPC.** Install the new `otel-grpc` extra (`dlboard-client[otel-grpc]`,
-  `dlboard[otel-grpc]`) and set `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`, for a collector that speaks gRPC alone. Each signal's
-  own `OTEL_EXPORTER_OTLP_{TRACES,METRICS,LOGS}_PROTOCOL` overrides it, as OpenTelemetry's SDK does; gRPC without the
-  extra, or `http/json`, stops startup naming what to install or set. grpcio stays out of `otel`, and the client's floor
-  (OpenTelemetry 1.16) is the same for both, which CI runs over gRPC. (#300)
+* **Log Plotly figures, drawn as the interactive figures they are.** `PlotlyFigure` logs any Plotly figure (or a dict of one; the client does not depend on plotly), and the new `plotly` chart draws it in the browser with Plotly's own hover, zoom and legend, in the page's colors: a figure at each step gets a slider that keeps your zoom as it moves, a figure logged once is drawn as it is, and each run gets a figure of its own or, with `combine_runs`, every run's traces are drawn in one.
+  A figure logged with `bind` is a template that the data streamed into it at each step (`PlotlyData`: a trajectory's points, a heatmap's rows, any array) is drawn into, every step's, the latest step's, or one step at a time.
+* **A Plotly template can draw the metrics a run already logs.** Bind a trace's attribute to `metric("train/loss")` (or `metric("step")`) in place of a `PlotlyData` column, and the chart reads the metric with the template, sampled as a line chart's is; auto-generate fills in the chart's new `metrics` setting from the template.
+  (#620)
+* **A synced panel moves its Plotly and image charts' step sliders together,** so a prediction's picture and its PR curve stay at the same step.
+  (#621)
+* **A page loads nothing a logged figure names on other servers, unless the deployment allows it.** Every page's Content-Security-Policy lets it load pictures, media, fonts and data from dlboard alone, so the browser refuses a figure's pictures by URL, GeoJSON by URL, map styles and tiles, and whoever can log to a project cannot make the browser of everyone who opens its charts request a URL of their choosing.
+  `DLBOARD_PLOTLY_REMOTE_RESOURCES` lifts it; `DLBOARD_PLOTLY_MAP_TILES` names a tile server maps are drawn on meanwhile.
+  The S3 store in `presign` mode lets in its bucket, and a plugin can let in what its deployment needs (`dlboard.serve.allow_resources_from`).
+  (#622)
+* **Traces, metrics and logs over OTLP/gRPC.** Install the new `otel-grpc` extra (`dlboard-client[otel-grpc]`, `dlboard[otel-grpc]`) and set `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`, for a collector that speaks gRPC alone.
+  Each signal's own `OTEL_EXPORTER_OTLP_{TRACES,METRICS,LOGS}_PROTOCOL` overrides it, as OpenTelemetry's SDK does; gRPC without the extra, or `http/json`, stops startup naming what to install or set.
+  grpcio stays out of `otel`, and the client's floor (OpenTelemetry 1.16) is the same for both, which CI runs over gRPC.
+  (#300)
 
 ### Changed
 
-* **A Plotly chart's read does not grow with training.** Its figures are read a window of steps at a time, as an image
-  chart's pictures are, and a template's data only at the steps it draws (each run's latest, or thinned to
-  `max_data_steps`). `DataStore.fetch_artifacts(steps=)` also takes a set of steps, and `DataRequest.artifact_windows`
-  replaces `artifact_window`, each window saying which steps it reads (`WindowAt`). (#619)
-* **Ctrl+K, and the experiment pickers of the pinned-runs sidebar, the add-runs modal and the Retention tab, search the
-  server as you type** rather than listing every experiment (and, for Ctrl+K, every comparison) of every project. Each
-  lists the newest and keeps what it picked. New store reads: `search_experiments_in`, `search_comparisons_in`,
-  `get_experiments_by_id`. (#590)
-* **The Retention tab says when each rule deletes:** "deletes down to 2 once the project holds more than 12", or "deletes
-  down to 30 days once a run is more than 31 days old", so a project holding more runs than its count no longer looks
-  stuck. (#628)
+* **A Plotly chart's read does not grow with training.** Its figures are read a window of steps at a time, as an image chart's pictures are, and a template's data only at the steps it draws (each run's latest, or thinned to `max_data_steps`).
+  `DataStore.fetch_artifacts(steps=)` also takes a set of steps, and `DataRequest.artifact_windows` replaces `artifact_window`, each window saying which steps it reads (`WindowAt`).
+  (#619)
+* **Ctrl+K, and the experiment pickers of the pinned-runs sidebar, the add-runs modal and the Retention tab, search the server as you type** rather than listing every experiment (and, for Ctrl+K, every comparison) of every project.
+  Each lists the newest and keeps what it picked.
+  New store reads: `search_experiments_in`, `search_comparisons_in`, `get_experiments_by_id`.
+  (#590)
+* **The Retention tab says when each rule deletes:** "deletes down to 2 once the project holds more than 12", or "deletes down to 30 days once a run is more than 31 days old", so a project holding more runs than its count no longer looks stuck.
+  (#628)
 
 ### Fixed
 
-* Re-saving a pending retention rule now picks up a shorter `DLBOARD_RETENTION_GRACE_DAYS`, where it kept the date it was
-  first given. (#628)
-* Showing or hiding a run with an artifact chart on screen no longer covers every chart with the panel area's loader while
-  they redraw. (#627)
-* `/setup` makes the first admin again. The users retention and the Trash work as, which they make as the server starts,
-  had counted as someone already using it, so it closed for good and a restart with it on was refused. They are no longer
-  listed among the users on the admin page or offered when you mention someone in a note. (#647)
-* `DLBOARD_POSTGRES_PREPARE_THRESHOLD` can be turned off for PgBouncer's transaction pooling: `null`, as documented, was
-  refused, and so was the empty value a Kubernetes manifest's `value: null` sets. (#640)
+* Re-saving a pending retention rule now picks up a shorter `DLBOARD_RETENTION_GRACE_DAYS`, where it kept the date it was first given.
+  (#628)
+* Showing or hiding a run with an artifact chart on screen no longer covers every chart with the panel area's loader while they redraw.
+  (#627)
+* `/setup` makes the first admin again.
+  The users retention and the Trash work as, which they make as the server starts, had counted as someone already using it, so it closed for good and a restart with it on was refused.
+  They are no longer listed among the users on the admin page or offered when you mention someone in a note.
+  (#647)
+* `DLBOARD_POSTGRES_PREPARE_THRESHOLD` can be turned off for PgBouncer's transaction pooling: `null`, as documented, was refused, and so was the empty value a Kubernetes manifest's `value: null` sets.
+  (#640)
 
 ## [0.16.0] - 2026-11-11
 
 ### Added
 
-* **A comparison page follows what is logged live,** as an experiment's does: its live poll watches every experiment
-  it draws runs of, and redraws only the charts whose data changed. (#497)
-* **Diff on a comparison page.** Select runs in its list and **Diff** compares them, whatever experiments they are of,
-  each named "experiment / run" and read from its own experiment; a link reopens it, and reaches no run outside the
-  comparison. (#497)
-* **A project page with hundreds of experiments or comparisons draws a page of them.** Its experiment cards (the newest
-  first) and its comparison cards each show 24 at a time, with a pager and a filter by name or id once there is more than
-  a page, both kept in the page's link. The store reads only that page and its experiments' activity
-  (`DataStore.search_experiments`, `search_comparisons`, `get_experiment_stats(..., experiment_ids=)`), through a new
-  index on a project's live experiments (migration `0011`, expand-only). (#502)
-* **An experiment's page says what retention keeps of it.** A line under its header gives the experiment's own rule (or
-  "Follows the project") and its project's, and links to the project's Retention tab, so the page runs are deleted from
-  says what deletes them (#547).
-* **`register_experiment_section`** (`ExperimentSection`, `ExperimentSlot.HEADER`), for a plugin to add a line under an
-  experiment's header. See [docs/background-tasks.md](docs/background-tasks.md#plugin-settings-and-page-sections).
-* **A docs index,** [docs/README.md](docs/README.md): every page, grouped by running a server, operating it, and extending
-  it. A test fails when a page is missing from it, or when a link in the docs reaches a file or heading that is not there.
+* **A comparison page follows what is logged live,** as an experiment's does: its live poll watches every experiment it draws runs of, and redraws only the charts whose data changed.
+  (#497)
+* **Diff on a comparison page.** Select runs in its list and **Diff** compares them, whatever experiments they are of, each named "experiment / run" and read from its own experiment; a link reopens it, and reaches no run outside the comparison.
+  (#497)
+* **A project page with hundreds of experiments or comparisons draws a page of them.** Its experiment cards (the newest first) and its comparison cards each show 24 at a time, with a pager and a filter by name or id once there is more than a page, both kept in the page's link.
+  The store reads only that page and its experiments' activity (`DataStore.search_experiments`, `search_comparisons`, `get_experiment_stats(..., experiment_ids=)`), through a new index on a project's live experiments (migration `0011`, expand-only).
+  (#502)
+* **An experiment's page says what retention keeps of it.** A line under its header gives the experiment's own rule (or "Follows the project") and its project's, and links to the project's Retention tab, so the page runs are deleted from says what deletes them (#547).
+* **`register_experiment_section`** (`ExperimentSection`, `ExperimentSlot.HEADER`), for a plugin to add a line under an experiment's header.
+  See [docs/background-tasks.md](docs/background-tasks.md#plugin-settings-and-page-sections).
+* **A docs index,** [docs/README.md](docs/README.md): every page, grouped by running a server, operating it, and extending it.
+  A test fails when a page is missing from it, or when a link in the docs reaches a file or heading that is not there.
   (#592)
-* **A skill for a coding agent writing a plugin,** [skills/dlboard-plugin](skills/dlboard-plugin/SKILL.md): which kind
-  of plugin to write, the built-in to read first, the public API, the rules, and how to test it, against the installed
-  version's own source. Copy it from the release tag you deploy. A test fails when a file or name it gives has moved.
+* **A skill for a coding agent writing a plugin,** [skills/dlboard-plugin](skills/dlboard-plugin/SKILL.md): which kind of plugin to write, the built-in to read first, the public API, the rules, and how to test it, against the installed version's own source.
+  Copy it from the release tag you deploy.
+  A test fails when a file or name it gives has moved.
   (#592)
-* **`dlboard.plugins.data_stores` exports `BlobBackend`, `RefAccess` and `plug_blob_store`,** so an artifact store over a
-  blob store of its own is built without private imports. (#592)
+* **`dlboard.plugins.data_stores` exports `BlobBackend`, `RefAccess` and `plug_blob_store`,** so an artifact store over a blob store of its own is built without private imports.
+  (#592)
 
 ### Changed
 
-* **A page of several panels reads each experiment's run names and metric names once,** not once per panel, so a comparison
-  of many experiments makes half the round trips it did for each panel past the first, and an experiment page's open
-  panels and live updates read less too. (#505)
-* **The Grafana metrics dashboard charts everything the server publishes.** `docs/grafana/dlboard.json` gains a
-  **Background tasks** row (runs by outcome, duration, backlog, custodian starts), a **Retention** row (runs deleted and
-  refused), and the artifact staging and recording durations. A test now fails when a metric is added without a row in
-  [docs/telemetry.md](docs/telemetry.md) and a panel on the dashboard, so it no longer falls behind. See
-  [docs/grafana](docs/grafana/README.md). (#582)
-* The project, experiment and comparison pages draw their headers with one component, and saving a description (or a
-  comparison's name) updates it in place, rather than drawing the header again (#547). Reopening a comparison's edit dialog
-  now shows what is saved, not what was typed before a cancel.
-* **An experiment page's breadcrumb and the Compare menus read only what they show.** The experiment switcher read every
-  experiment of the project to offer the newest 15, and each Compare menu (on an experiment's run list, a comparison's,
-  and the project's pinned runs) every comparison the viewer may change to offer 10; each now reads that page of them.
-  `DataStore.search_comparisons` gains `which=` (`ComparisonFilter`: `VISIBLE`, `EDITABLE`, `OWN`), and
-  `list_comparisons` loses its `editable=`, which a page of comparisons could not be filtered by. (#590)
-* **A project's page is a tab each for its experiments, its comparisons, its sharing and what plugins add** (Retention, in
-  a local deployment), rather than one page of them all, so what a deployment's plugins add never lengthens it and each
-  says whose it is. The tab open is in the page's link (`?tab=comparisons`), and the experiment page's retention line opens
-  the project on its Retention tab. The line retention drew under the project's header is now in its tab. For a plugin,
-  `register_project_tab(app, ProjectTab(key, label, render))` replaces `register_project_section`, `ProjectSection` and
-  `ProjectSlot`, which are gone; see
-  [docs/background-tasks.md](docs/background-tasks.md#plugin-settings-and-page-sections). (#615)
+* **A page of several panels reads each experiment's run names and metric names once,** not once per panel, so a comparison of many experiments makes half the round trips it did for each panel past the first, and an experiment page's open panels and live updates read less too.
+  (#505)
+* **The Grafana metrics dashboard charts everything the server publishes.** `docs/grafana/dlboard.json` gains a **Background tasks** row (runs by outcome, duration, backlog, custodian starts), a **Retention** row (runs deleted and refused), and the artifact staging and recording durations.
+  A test now fails when a metric is added without a row in [docs/telemetry.md](docs/telemetry.md) and a panel on the dashboard, so it no longer falls behind.
+  See [docs/grafana](docs/grafana/README.md).
+  (#582)
+* The project, experiment and comparison pages draw their headers with one component, and saving a description (or a comparison's name) updates it in place, rather than drawing the header again (#547).
+  Reopening a comparison's edit dialog now shows what is saved, not what was typed before a cancel.
+* **An experiment page's breadcrumb and the Compare menus read only what they show.** The experiment switcher read every experiment of the project to offer the newest 15, and each Compare menu (on an experiment's run list, a comparison's, and the project's pinned runs) every comparison the viewer may change to offer 10; each now reads that page of them.
+  `DataStore.search_comparisons` gains `which=` (`ComparisonFilter`: `VISIBLE`, `EDITABLE`, `OWN`), and `list_comparisons` loses its `editable=`, which a page of comparisons could not be filtered by.
+  (#590)
+* **A project's page is a tab each for its experiments, its comparisons, its sharing and what plugins add** (Retention, in a local deployment), rather than one page of them all, so what a deployment's plugins add never lengthens it and each says whose it is.
+  The tab open is in the page's link (`?tab=comparisons`), and the experiment page's retention line opens the project on its Retention tab.
+  The line retention drew under the project's header is now in its tab.
+  For a plugin, `register_project_tab(app, ProjectTab(key, label, render))` replaces `register_project_section`, `ProjectSection` and `ProjectSlot`, which are gone; see [docs/background-tasks.md](docs/background-tasks.md#plugin-settings-and-page-sections).
+  (#615)
 
 ### Fixed
 
-* **A server killed outright no longer leaves its web workers running.** Killed by `kill -9` or the OOM killer, the server
-  stopped its custodian but not its Granian workers, which went on holding its port and its database. Each worker now
-  goes with the server (on Linux), as the custodian does. (#584)
-* **The `files` and `series_band` chart type names are part of the compatibility promise,** as every other built-in
-  chart's is: views save them. A test now fails when a built-in chart type's name is not frozen, or is missing from
-  [docs/compatibility.md](docs/compatibility.md) or its module from [docs/plugins/charts.md](docs/plugins/charts.md).
+* **A server killed outright no longer leaves its web workers running.** Killed by `kill -9` or the OOM killer, the server stopped its custodian but not its Granian workers, which went on holding its port and its database.
+  Each worker now goes with the server (on Linux), as the custodian does.
+  (#584)
+* **The `files` and `series_band` chart type names are part of the compatibility promise,** as every other built-in chart's is: views save them.
+  A test now fails when a built-in chart type's name is not frozen, or is missing from [docs/compatibility.md](docs/compatibility.md) or its module from [docs/plugins/charts.md](docs/plugins/charts.md).
   (#592)
-* The storage docs said to set a blob store with `set_artifact_store`, which skips starting what `plug_blob_store`
-  starts, and described the Postgres bundles as missing their retention plugins. (#592)
-* **A deployment that leaves out the image chart no longer offers it.** Its chart type was registered when its module was
-  imported, so any deployment had it, without the scripts and stylesheet its plugin serves; it is now registered by the
-  plugin, as every other chart's is. (#601)
-* **Showing or hiding a run no longer draws every chart again.** A run's eye, **Show**, **Hide** and "show the newest
-  runs" covered the panels with a spinner and drew each of them from scratch, on an experiment's page and a comparison's.
-  Now only the charts whose data changes are redrawn, in place, as a live update redraws them. (#616)
+* The storage docs said to set a blob store with `set_artifact_store`, which skips starting what `plug_blob_store` starts, and described the Postgres bundles as missing their retention plugins.
+  (#592)
+* **A deployment that leaves out the image chart no longer offers it.** Its chart type was registered when its module was imported, so any deployment had it, without the scripts and stylesheet its plugin serves; it is now registered by the plugin, as every other chart's is.
+  (#601)
+* **Showing or hiding a run no longer draws every chart again.** A run's eye, **Show**, **Hide** and "show the newest runs" covered the panels with a spinner and drew each of them from scratch, on an experiment's page and a comparison's.
+  Now only the charts whose data changes are redrawn, in place, as a live update redraws them.
+  (#616)
 
 ## [0.15.0] - 2026-11-09
 
 ### Added
 
-* **Retention policies.** A deployment people log to for months no longer grows without bound. Each project keeps every
-  run, the newest N runs (of each experiment, or of the whole project), or the runs of the last N days, set by its owner in
-  a new **Retention** section of the project page; an editor may hold an experiment to a stricter rule of the same kind.
-  A changed rule waits `DLBOARD_RETENTION_GRACE_DAYS` (7) while the rule before it is still enforced, and **Preview** says
-  what it would delete. The new `retention` plugin (in every storage bundle) moves what a rule says to delete to the Trash, in
-  batches past a slack, as the `dlboard:retention` user, from the custodian process: one check a project, claimed by any
-  custodian, paced to its share of the database, so servers sharing a Postgres add capacity and live traffic keeps the
-  database. A project it has not caught up with is flagged on its page and counted in `dlboard.retention.runs.deleted` and
-  `dlboard.task.backlog`. Admins set the default for new projects and a cap owners cannot exceed
-  (`DLBOARD_RETENTION_DEFAULT_*`, `DLBOARD_RETENTION_MAX_*`). With `DLBOARD_RETENTION_LOCK_AFTER_HOURS` set, a project that
-  has been behind its rule that long takes no new runs (HTTP 423, with the reason in the client's error, counted in
-  `dlboard.retention.runs.refused`) until it catches up; runs already logging are never refused. See
-  [docs/retention.md](docs/retention.md). (#472)
-* **Kept runs.** **Keep** in any run list's bar takes a run out of retention's reach (a lock after its name says so). An
-  editor keeps a run; only an owner releases it or deletes it, including by deleting its experiment. Keeping is not pinning,
-  which anyone can pin. (#472)
-* **The Trash empties itself.** What has been in the Trash `DLBOARD_TRASH_RETENTION_DAYS` (30) is purged, whoever deleted
-  it, counted from the first time the server checks, so upgrading never purges old Trash at once. (#472)
-* **A custodian process for background work.** Purges, blob deletion, the Trash and retention no longer run on threads of
-  the web workers: the server starts one custodian process beside them, restarts it if it dies, kills and replaces it if it
-  hangs, and it dies with the server. Plugins register a `Task` instead of starting a thread; the database holds what each
-  task and custodian is doing, so several servers share the work (`FOR UPDATE SKIP LOCKED` on Postgres) and see whether it
-  is being done: the admin page's new **Background tasks** tab, `/healthz/custodian`, and the `dlboard.task.*` and
-  `dlboard.custodian.starts` metrics. A task is due `every` after its last run finished, as the database records it, so
-  several servers share one schedule and a machine that sleeps runs what came due within a poll of waking. An admin's Purge
-  is queued and done by the custodian, not in the request. See [docs/background-tasks.md](docs/background-tasks.md).
+* **Retention policies.** A deployment people log to for months no longer grows without bound.
+  Each project keeps every run, the newest N runs (of each experiment, or of the whole project), or the runs of the last N days, set by its owner in a new **Retention** section of the project page; an editor may hold an experiment to a stricter rule of the same kind.
+  A changed rule waits `DLBOARD_RETENTION_GRACE_DAYS` (7) while the rule before it is still enforced, and **Preview** says what it would delete.
+  The new `retention` plugin (in every storage bundle) moves what a rule says to delete to the Trash, in batches past a slack, as the `dlboard:retention` user, from the custodian process: one check a project, claimed by any custodian, paced to its share of the database, so servers sharing a Postgres add capacity and live traffic keeps the database.
+  A project it has not caught up with is flagged on its page and counted in `dlboard.retention.runs.deleted` and `dlboard.task.backlog`.
+  Admins set the default for new projects and a cap owners cannot exceed (`DLBOARD_RETENTION_DEFAULT_*`, `DLBOARD_RETENTION_MAX_*`).
+  With `DLBOARD_RETENTION_LOCK_AFTER_HOURS` set, a project that has been behind its rule that long takes no new runs (HTTP 423, with the reason in the client's error, counted in `dlboard.retention.runs.refused`) until it catches up; runs already logging are never refused.
+  See [docs/retention.md](docs/retention.md).
+  (#472)
+* **Kept runs.** **Keep** in any run list's bar takes a run out of retention's reach (a lock after its name says so).
+  An editor keeps a run; only an owner releases it or deletes it, including by deleting its experiment.
+  Keeping is not pinning, which anyone can pin.
+  (#472)
+* **The Trash empties itself.** What has been in the Trash `DLBOARD_TRASH_RETENTION_DAYS` (30) is purged, whoever deleted it, counted from the first time the server checks, so upgrading never purges old Trash at once.
+  (#472)
+* **A custodian process for background work.** Purges, blob deletion, the Trash and retention no longer run on threads of the web workers: the server starts one custodian process beside them, restarts it if it dies, kills and replaces it if it hangs, and it dies with the server.
+  Plugins register a `Task` instead of starting a thread; the database holds what each task and custodian is doing, so several servers share the work (`FOR UPDATE SKIP LOCKED` on Postgres) and see whether it is being done: the admin page's new **Background tasks** tab, `/healthz/custodian`, and the `dlboard.task.*` and `dlboard.custodian.starts` metrics.
+  A task is due `every` after its last run finished, as the database records it, so several servers share one schedule and a machine that sleeps runs what came due within a poll of waking.
+  An admin's Purge is queued and done by the custodian, not in the request.
+  See [docs/background-tasks.md](docs/background-tasks.md).
   (#472, #561)
-* **Plugins can keep a setting per project** (`register_setting`, with who may read and write each scope and a check of the
-  value) **and add a section to a project's page** (`register_project_section`), without touching the store, **and refuse
-  new runs in a project** (`register_run_guard`, raising `ProjectLockedError`, which the REST API answers with HTTP 423).
-  Retention is built on them. (#472)
-* **Pin or keep a run from the script that launches it.** `DLBoardLogger(..., pin=PinColor.RED, keep=True)` (and
-  `DLBoardLogger.from_names`) pins the run for you and keeps it out of retention's reach as the run is created, so a baseline
-  need not wait for someone to click; a server that refuses (keeping takes an editor) fails the constructor, with its reason,
-  before anything is logged. It is one request, `POST /api/v1/runs/<id>/mark`, and `BasicDlboardAPI.mark_run`. See
-  [docs/client.md](docs/client.md#pinning-and-keeping-a-run). (#499, #562)
+* **Plugins can keep a setting per project** (`register_setting`, with who may read and write each scope and a check of the value) **and add a section to a project's page** (`register_project_section`), without touching the store, **and refuse new runs in a project** (`register_run_guard`, raising `ProjectLockedError`, which the REST API answers with HTTP 423).
+  Retention is built on them.
+  (#472)
+* **Pin or keep a run from the script that launches it.** `DLBoardLogger(..., pin=PinColor.RED, keep=True)` (and `DLBoardLogger.from_names`) pins the run for you and keeps it out of retention's reach as the run is created, so a baseline need not wait for someone to click; a server that refuses (keeping takes an editor) fails the constructor, with its reason, before anything is logged.
+  It is one request, `POST /api/v1/runs/<id>/mark`, and `BasicDlboardAPI.mark_run`.
+  See [docs/client.md](docs/client.md#pinning-and-keeping-a-run).
+  (#499, #562)
 
 ### Changed
 
-* **Migrations `0008` to `0010`** add the custodian's tables (copying the old purge queue's pending rows into them), partial
-  indexes for deleted rows, `Run.kept_at`/`kept_by`, the scoped settings table and partial indexes for live and kept runs
-  (the one for live runs replaces `idx_run_experiment`: the same index over the live rows only): expand-only but for that
-  index, which loses no data. Every existing project keeps every run until an admin sets a default, which then applies
-  after the grace period. See [docs/upgrading.md](docs/upgrading.md#background-tasks-and-retention). (#472)
+* **Migrations `0008` to `0010`** add the custodian's tables (copying the old purge queue's pending rows into them), partial indexes for deleted rows, `Run.kept_at`/`kept_by`, the scoped settings table and partial indexes for live and kept runs (the one for live runs replaces `idx_run_experiment`: the same index over the live rows only): expand-only but for that index, which loses no data.
+  Every existing project keeps every run until an admin sets a default, which then applies after the grace period.
+  See [docs/upgrading.md](docs/upgrading.md#background-tasks-and-retention).
+  (#472)
 * **"Resume cleanup" is gone** from the admin page: queued work always resumes, by itself.
-* **A custom `DataStore` has more to implement.** `trashed_before`, `keep_runs`, `release_runs`, `kept_runs`,
-  `get_scoped_settings`, `all_scoped_settings`, `put_scoped_setting`, `count_runs`, and `get_runs(created_before=,
-  oldest_first=, include_kept=)`; `delete_runs` takes `spare_kept` and returns the ids it deleted. The purge queue's methods
-  are gone (`list_pending_artifact_purges`, `count_pending_artifact_purges`, `complete_artifact_purge`,
-  `fail_artifact_purge`, `artifact_purge_progress_at`, `record_artifact_purge_progress`), as is
-  `artifact_purge_worker.wake()`: queue a work item for the custodian instead (see
-  [docs/background-tasks.md](docs/background-tasks.md#for-plugin-authors)). (#472)
-* **A client's error says why a server refused it.** A 4xx's `error` is in the exception's message, ahead of the server's
-  request id.
-* **A page reads the users it shows, not every user.** A non-admin's lookup of one name used to read every user, grant and
-  project on the site. The project's Sharing section and a note's thread now ask only for the people they name, a user is
-  looked up by id with one keyed read, and the mention picker lists the first fifty people and searches the rest on the server
-  as you type. (#501)
-* **A custom `DataStore` changes in three places.** `get_users(user_ids=, name_contains=, limit=)` replaces `list_users`,
-  `list_project_grants` takes `user_ids=`, and `purge_project`, `purge_experiment` and `purge_run` take `pace=` (see below).
+* **A custom `DataStore` has more to implement.** `trashed_before`, `keep_runs`, `release_runs`, `kept_runs`, `get_scoped_settings`, `all_scoped_settings`, `put_scoped_setting`, `count_runs`, and `get_runs(created_before=,   oldest_first=, include_kept=)`; `delete_runs` takes `spare_kept` and returns the ids it deleted.
+  The purge queue's methods are gone (`list_pending_artifact_purges`, `count_pending_artifact_purges`, `complete_artifact_purge`, `fail_artifact_purge`, `artifact_purge_progress_at`, `record_artifact_purge_progress`), as is `artifact_purge_worker.wake()`: queue a work item for the custodian instead (see [docs/background-tasks.md](docs/background-tasks.md#for-plugin-authors)).
+  (#472)
+* **A client's error says why a server refused it.** A 4xx's `error` is in the exception's message, ahead of the server's request id.
+* **A page reads the users it shows, not every user.** A non-admin's lookup of one name used to read every user, grant and project on the site.
+  The project's Sharing section and a note's thread now ask only for the people they name, a user is looked up by id with one keyed read, and the mention picker lists the first fifty people and searches the rest on the server as you type.
+  (#501)
+* **A custom `DataStore` changes in three places.** `get_users(user_ids=, name_contains=, limit=)` replaces `list_users`, `list_project_grants` takes `user_ids=`, and `purge_project`, `purge_experiment` and `purge_run` take `pace=` (see below).
   (#501, #563)
 
 ### Fixed
 
-* **Purging one very large run no longer holds the database for as long as the run is big.** A purge deleted a run's metrics,
-  histograms and artifacts in one transaction, and queued each artifact's blob for deletion one statement at a time inside
-  it. On SQLite, which lets one writer in at a time, a run of twenty million metrics held every other writer out for about a
-  minute, and a run logging beside it failed with `database is locked`; on Postgres one purge of a hundred thousand artifacts
-  was a transaction of a hundred seconds. The custodian now deletes those rows in chunks, each its own transaction, resting
-  between them like its other work, and queues a chunk's blobs together. The longest any other writer waited, in the same
-  twenty million metrics or half a million artifacts, fell from the full thirty seconds to under 0.4 s. A purge that is
-  interrupted goes on where it was. A run restored while its purge goes on is not purged, but comes back without the rows
-  already deleted. (#563)
+* **Purging one very large run no longer holds the database for as long as the run is big.** A purge deleted a run's metrics, histograms and artifacts in one transaction, and queued each artifact's blob for deletion one statement at a time inside it.
+  On SQLite, which lets one writer in at a time, a run of twenty million metrics held every other writer out for about a minute, and a run logging beside it failed with `database is locked`; on Postgres one purge of a hundred thousand artifacts was a transaction of a hundred seconds.
+  The custodian now deletes those rows in chunks, each its own transaction, resting between them like its other work, and queues a chunk's blobs together.
+  The longest any other writer waited, in the same twenty million metrics or half a million artifacts, fell from the full thirty seconds to under 0.4 s.
+  A purge that is interrupted goes on where it was.
+  A run restored while its purge goes on is not purged, but comes back without the rows already deleted.
+  (#563)
 
 ## [0.14.0] - 2026-11-04
 
 ### Added
 
-* **Pins, and comparisons of runs from several experiments.** A run could only be drawn beside the other runs of its
-  own experiment. Now a **pin** says a run matters (plain, or one of nine colours; project-wide, with who pinned it) and can
-  be put on a run the moment it exists. A run's pins are one pin filled with its colours, and a colour is only ever shown as
-  a pin in that colour. The project page's sidebar lists a project's pinned runs, a row to a run, filtered by colour, pinner,
-  experiment and name, and the filters are in the address bar. A **comparison** is a dashboard of runs picked from any
-  experiments of a project, drawn with the experiment page's panels, charts and chart editor, and labelled "experiment /
-  run". Start one from any run list (**Compare**, from the selected runs) or compare every run pinned in a colour (**Compare
-  pins**). It is its owner's, and can be shared with the project: the runs of a shared comparison are any editor's to change,
-  while its charts and settings fork a copy of your own, as a saved view does. Which runs you hide on a comparison is yours
-  alone, in the address bar. Every read stays one experiment's, on the existing indexes, so what a comparison reads is that
-  of its runs, once for each experiment it draws. A comparison holds at most `DLBOARD_MAX_COMPARISON_RUNS` runs (100).
-  Migrations `0006` and `0007` add the pin and comparison member tables, expand-only. Not yet on a comparison: live updates
-  and the A/B diff. See [docs/comparisons.md](docs/comparisons.md). (#483)
-* **Change or delete many charts at once.** A panel's actions menu has **Set x-axis…** and **Delete…** for the charts its
-  chart filter matches. Both need a filter (without one they would reach every chart of the panel), ask first and say how
-  many charts they reach, and are an edit of the page like any other, so an edit to a page that is not yours is saved in
-  a copy of your own. (#509)
-* **The comparison's list has a Columns picker, and Ctrl+K finds comparisons.** The picker is the experiment list's: the
-  hyperparameters of the comparison's runs and the metrics of their experiments, saved in the comparison. The jump
-  palette lists the comparisons you may see beside each project's experiments. (#521, #498)
-* **A pin's notice offers to compare every pin of its colour.** The notice has a **Compare every pin →** link that does
-  what the **Compare pins** menu does. **Unpin** offers only the colours you hold on the selected runs. (#522, #515)
+* **Pins, and comparisons of runs from several experiments.** A run could only be drawn beside the other runs of its own experiment.
+  Now a **pin** says a run matters (plain, or one of nine colours; project-wide, with who pinned it) and can be put on a run the moment it exists.
+  A run's pins are one pin filled with its colours, and a colour is only ever shown as a pin in that colour.
+  The project page's sidebar lists a project's pinned runs, a row to a run, filtered by colour, pinner, experiment and name, and the filters are in the address bar.
+  A **comparison** is a dashboard of runs picked from any experiments of a project, drawn with the experiment page's panels, charts and chart editor, and labelled "experiment / run".
+  Start one from any run list (**Compare**, from the selected runs) or compare every run pinned in a colour (**Compare pins**).
+  It is its owner's, and can be shared with the project: the runs of a shared comparison are any editor's to change, while its charts and settings fork a copy of your own, as a saved view does.
+  Which runs you hide on a comparison is yours alone, in the address bar.
+  Every read stays one experiment's, on the existing indexes, so what a comparison reads is that of its runs, once for each experiment it draws.
+  A comparison holds at most `DLBOARD_MAX_COMPARISON_RUNS` runs (100).
+  Migrations `0006` and `0007` add the pin and comparison member tables, expand-only.
+  Not yet on a comparison: live updates and the A/B diff.
+  See [docs/comparisons.md](docs/comparisons.md).
+  (#483)
+* **Change or delete many charts at once.** A panel's actions menu has **Set x-axis…** and **Delete…** for the charts its chart filter matches.
+  Both need a filter (without one they would reach every chart of the panel), ask first and say how many charts they reach, and are an edit of the page like any other, so an edit to a page that is not yours is saved in a copy of your own.
+  (#509)
+* **The comparison's list has a Columns picker, and Ctrl+K finds comparisons.** The picker is the experiment list's: the hyperparameters of the comparison's runs and the metrics of their experiments, saved in the comparison.
+  The jump palette lists the comparisons you may see beside each project's experiments.
+  (#521, #498)
+* **A pin's notice offers to compare every pin of its colour.** The notice has a **Compare every pin →** link that does what the **Compare pins** menu does.
+  **Unpin** offers only the colours you hold on the selected runs.
+  (#522, #515)
 
 ### Changed
 
-* **A run has an eye to draw it and a checkbox to select it, and a bar acts on the selected runs.** The checkbox in the
-  experiment sidebar used to mean "draw this run", leaving no way to select runs to do something to them. The eye draws
-  (and is saved with the view, as a selection of runs always was); the checkbox selects, and a bar above the list offers Show,
-  Hide, Diff, Pin, Unpin, Compare and Delete on what is selected. Deleting runs asks once, saying how many, and replaces the
-  trash icon on each row; the Compare button that opened the A/B diff is the bar's Diff. A run's name links to its
-  experiment with only that run drawn. (#483)
-* **The sidebar is the page's runs, and the breadcrumb switches experiments.** The sidebar listed the project's
-  experiments, which the project page lists too. It now holds the runs of what you are looking at: an experiment's, a
-  comparison's, or the project's pinned runs. The experiment in the breadcrumb is a menu of the project's experiments to
-  go to. (#483)
-* **The suggest-charts drawer lists a page at a time, and has an exclude box.** It listed the first 50 suggestions, to
-  be narrowed only by its filter. It now lists pages of 25 with Previous and Next, and an "Exclude" box leaves out what
-  its comma-separated words or `*` patterns name, by key or panel. (#478)
-* **A bar chart draws a bar for each visible run, grouped by its x-axis.** A bar chart merged the runs that shared an x
-  value into one bar, so a chart of several runs drew one of them, or an average of them. It now has a group of bars for each
-  value of its x-axis (a hyperparameter value, an epoch, a step, the run), and in it a bar for each run that has that value, in
-  the run's colour. The new `aggregation` **latest** is the default: a run's last value, which reads no more than that, so
-  the chart costs what it did. Any other aggregation (`mean`, `median`, `min`, `max`, `sum`, `count`) is of the values a run
-  logged in the group, and reads every step as a line chart does. A saved chart that asked for `mean` now means a run's
-  mean, not the mean of its group's last values. (#493)
-* **The run list is no longer drawn again when its runs change.** A run starting or changing, and a pin anyone makes,
-  patched the list's rows in place; it is drawn again only when its columns change, so it keeps its scroll, sort, filters and
-  selection, and the tick that selects runs is not undone by a live update. A pin or unpin moves the experiment's revision
-  on, so the live poll finds pins other people make. (#513, #524, #503)
-* **Deleting many runs is one statement per batch, not a transaction per run.** A selection of 5,000 runs took about
-  a minute and a half on SQLite and 45 seconds on Postgres (an artifact each); it takes about a second and two. Each run keeps its own audit entry, with the counts of what it owned,
-  and restoring one brings back its own artifacts only. Runs deleted together share a deletion time, so the trash lists them
-  newest id first. (#514)
+* **A run has an eye to draw it and a checkbox to select it, and a bar acts on the selected runs.** The checkbox in the experiment sidebar used to mean "draw this run", leaving no way to select runs to do something to them.
+  The eye draws (and is saved with the view, as a selection of runs always was); the checkbox selects, and a bar above the list offers Show, Hide, Diff, Pin, Unpin, Compare and Delete on what is selected.
+  Deleting runs asks once, saying how many, and replaces the trash icon on each row; the Compare button that opened the A/B diff is the bar's Diff.
+  A run's name links to its experiment with only that run drawn.
+  (#483)
+* **The sidebar is the page's runs, and the breadcrumb switches experiments.** The sidebar listed the project's experiments, which the project page lists too.
+  It now holds the runs of what you are looking at: an experiment's, a comparison's, or the project's pinned runs.
+  The experiment in the breadcrumb is a menu of the project's experiments to go to.
+  (#483)
+* **The suggest-charts drawer lists a page at a time, and has an exclude box.** It listed the first 50 suggestions, to be narrowed only by its filter.
+  It now lists pages of 25 with Previous and Next, and an "Exclude" box leaves out what its comma-separated words or `*` patterns name, by key or panel.
+  (#478)
+* **A bar chart draws a bar for each visible run, grouped by its x-axis.** A bar chart merged the runs that shared an x value into one bar, so a chart of several runs drew one of them, or an average of them.
+  It now has a group of bars for each value of its x-axis (a hyperparameter value, an epoch, a step, the run), and in it a bar for each run that has that value, in the run's colour.
+  The new `aggregation` **latest** is the default: a run's last value, which reads no more than that, so the chart costs what it did.
+  Any other aggregation (`mean`, `median`, `min`, `max`, `sum`, `count`) is of the values a run logged in the group, and reads every step as a line chart does.
+  A saved chart that asked for `mean` now means a run's mean, not the mean of its group's last values.
+  (#493)
+* **The run list is no longer drawn again when its runs change.** A run starting or changing, and a pin anyone makes, patched the list's rows in place; it is drawn again only when its columns change, so it keeps its scroll, sort, filters and selection, and the tick that selects runs is not undone by a live update.
+  A pin or unpin moves the experiment's revision on, so the live poll finds pins other people make.
+  (#513, #524, #503)
+* **Deleting many runs is one statement per batch, not a transaction per run.** A selection of 5,000 runs took about a minute and a half on SQLite and 45 seconds on Postgres (an artifact each); it takes about a second and two.
+  Each run keeps its own audit entry, with the counts of what it owned, and restoring one brings back its own artifacts only.
+  Runs deleted together share a deletion time, so the trash lists them newest id first.
+  (#514)
 
 ### Fixed
 
-* **A chart of a metric the shown runs have not logged draws empty, not as an error.** Autogenerated charts cover every
-  metric the experiment logged, so a run still training, or a metric only older runs logged, showed `KeyError: 'step'` for a
-  line chart (and a `KeyError` for a bar chart). They now say "Nothing logged for `<metric>` by the runs shown."
-* **Ctrl+K finds the experiments of every project.** The palette's list was a group for each project, and Mantine counts a
-  group against the options it lists however few of them match, so with more than about fifty projects the experiments of
-  the later ones could not be found by name. It is a flat list now, each option naming its project.
-* **Saving a chart no longer sometimes leaves a second copy of it.** A preview still being drawn when Save closed the
-  chart editor could land after the save and sit in the chart's card beside the saved chart, doubling its picture and its
-  legend. A preview that arrives with no chart being edited is now emptied. (#542)
-* **Switching views keeps the run you came to look at.** A page opened on one run (`?run=`, from a comparison's link, say)
-  lost it when you picked another view in the picker. It stays in the address, and the banner with it. Switching back to
-  the shared view after an edit had branched into one of your own also drew nothing: the address bar had moved without
-  the page router being told, so the shared view's address looked like the one it already held. It reloads the page
-  there now. (#543)
+* **A chart of a metric the shown runs have not logged draws empty, not as an error.** Autogenerated charts cover every metric the experiment logged, so a run still training, or a metric only older runs logged, showed `KeyError: 'step'` for a line chart (and a `KeyError` for a bar chart).
+  They now say "Nothing logged for `<metric>` by the runs shown."
+* **Ctrl+K finds the experiments of every project.** The palette's list was a group for each project, and Mantine counts a group against the options it lists however few of them match, so with more than about fifty projects the experiments of the later ones could not be found by name.
+  It is a flat list now, each option naming its project.
+* **Saving a chart no longer sometimes leaves a second copy of it.** A preview still being drawn when Save closed the chart editor could land after the save and sit in the chart's card beside the saved chart, doubling its picture and its legend.
+  A preview that arrives with no chart being edited is now emptied.
+  (#542)
+* **Switching views keeps the run you came to look at.** A page opened on one run (`?run=`, from a comparison's link, say) lost it when you picked another view in the picker.
+  It stays in the address, and the banner with it.
+  Switching back to the shared view after an edit had branched into one of your own also drew nothing: the address bar had moved without the page router being told, so the shared view's address looked like the one it already held.
+  It reloads the page there now.
+  (#543)
 
 ## [0.13.0] - 2026-10-27
 
 ### Added
 
-* **Traces and metrics say where an artifact upload's time goes.** Each step from the request to the recorded ref is
-  timed: staging the file, waiting for the writer, writing it, waiting for the batch that records its ref, and recording
-  it (`dlboard.artifact.stage.duration`, `.write_queue.wait`, `.ingest_queue.wait`, `.ingest.duration`, beside the
-  existing `.blob.write.duration`). The write and ingest spans carry their queue wait, and each store transaction's
-  commit is a span of its own (`dlboard.store.commit`); most of what an ingest span used to leave unaccounted for was
-  commits. Every span dlboard makes records the CPU time its thread spent in it (`dlboard.thread.cpu_time`), so a slow
-  span that was waiting (on the database, a lock, the GIL) can be told from one that computed. (#392)
-* **Traces say which Dash callback a request ran, and what the experiment page spent it on.** A
-  `POST /_dash-update-component` span names the outputs it updates (`dlboard.dash.outputs`; a pattern-matching id by its
-  `type` alone, never a panel or chart name), each kind of data a panel reads is a `dlboard.panel.read` span (a metric
-  read with its reduction and whether it read every metric), with `dlboard.panel.read.duration` by kind, and drawing
-  each chart is a `dlboard.chart.render` span. See "Where the time went" in [docs/telemetry.md](docs/telemetry.md).
-* **`tools/ingest_load.py` reproduces an artifact upload load and reports where the ingest spent it.** Against a
-  Postgres and a traced server it starts itself, or a deployment of yours, optionally with headless browsers holding
-  the experiment page open and a metric history seeded, and under py-spy.
-* **A chart says when it draws every step of many metrics, and past a limit is not drawn.** A chart over a pattern
-  that matches more than `DLBOARD_WIDE_HISTORY_METRICS` (200) metrics, drawing each whole (a table of a row per step,
-  say), has a badge saying how many; past `DLBOARD_MAX_HISTORY_METRICS` (5,000) their history is not read, and the
-  chart says to show their last value or their spread instead. (#417)
-* **A line chart says when it read far more points than it draws**, with how many, and that logging less often draws
-  it faster. (#364)
+* **Traces and metrics say where an artifact upload's time goes.** Each step from the request to the recorded ref is timed: staging the file, waiting for the writer, writing it, waiting for the batch that records its ref, and recording it (`dlboard.artifact.stage.duration`, `.write_queue.wait`, `.ingest_queue.wait`, `.ingest.duration`, beside the existing `.blob.write.duration`).
+  The write and ingest spans carry their queue wait, and each store transaction's commit is a span of its own (`dlboard.store.commit`); most of what an ingest span used to leave unaccounted for was commits.
+  Every span dlboard makes records the CPU time its thread spent in it (`dlboard.thread.cpu_time`), so a slow span that was waiting (on the database, a lock, the GIL) can be told from one that computed.
+  (#392)
+* **Traces say which Dash callback a request ran, and what the experiment page spent it on.** A `POST /_dash-update-component` span names the outputs it updates (`dlboard.dash.outputs`; a pattern-matching id by its `type` alone, never a panel or chart name), each kind of data a panel reads is a `dlboard.panel.read` span (a metric read with its reduction and whether it read every metric), with `dlboard.panel.read.duration` by kind, and drawing each chart is a `dlboard.chart.render` span.
+  See "Where the time went" in [docs/telemetry.md](docs/telemetry.md).
+* **`tools/ingest_load.py` reproduces an artifact upload load and reports where the ingest spent it.** Against a Postgres and a traced server it starts itself, or a deployment of yours, optionally with headless browsers holding the experiment page open and a metric history seeded, and under py-spy.
+* **A chart says when it draws every step of many metrics, and past a limit is not drawn.** A chart over a pattern that matches more than `DLBOARD_WIDE_HISTORY_METRICS` (200) metrics, drawing each whole (a table of a row per step, say), has a badge saying how many; past `DLBOARD_MAX_HISTORY_METRICS` (5,000) their history is not read, and the chart says to show their last value or their spread instead.
+  (#417)
+* **A line chart says when it read far more points than it draws**, with how many, and that logging less often draws it faster.
+  (#364)
 
 ### Changed
 
 * Autogenerated chart max bumped from 200 to 1000 to increase the number of autogenerated charts before truncation.
 
-* **A chart type says what it reads with one method, `data_request`, in place of nine.** It returns a `DataRequest`,
-  a frozen value of what the chart draws, and each chart is now handed a frame of only that, not the panel's shared
-  one. Two charts of one panel that read a metric differently each get it their way, so a mean beside a line chart of
-  the same metric is computed by the database instead of read whole (#364), and drawing a page of line charts is
-  quicker: about 2.4 times on a typical experiment. A chart plugin moves its hints into the request:
+* **A chart type says what it reads with one method, `data_request`, in place of nine.** It returns a `DataRequest`, a frozen value of what the chart draws, and each chart is now handed a frame of only that, not the panel's shared one.
+  Two charts of one panel that read a metric differently each get it their way, so a mean beside a line chart of the same metric is computed by the database instead of read whole (#364), and drawing a page of line charts is quicker: about 2.4 times on a typical experiment.
+  A chart plugin moves its hints into the request:
 
   | Before | `DataRequest` field |
   | --- | --- |
@@ -560,567 +478,401 @@ pulls that section's body into the GitHub release notes and publishes both distr
   | `hint_required_histogram_keys` | `histograms` |
   | `hint_required_series` | `series` |
 
-  A chart whose saved settings no longer validate, or whose type is not installed, reads nothing for itself rather
-  than every metric: it shows its own error either way. (#395)
-* **The chart editor draws an edit that asks for the same data without reading it again**, such as a change of a
-  chart's height or colors, and opening the editor on a chart. A write to the experiment reads it afresh. (#335)
-* **A bar chart over a metric draws a bar per run.** With a metric on its x-axis (a final learning rate, say), runs that
-  ended on the same value used to be averaged into one bar; each run is now a bar of its own, labelled with its name,
-  with its x value in the tooltip ("lr: 0.001"). A hyperparameter on the x-axis still draws a bar per value. (#422)
-* **Run pickers list the newest 50 runs and find the rest as you type.** The compare picker and the notes' run picker
-  sent every run of the experiment to the browser; typing now searches the others on the server, by name or by id. A
-  storage plugin's `get_runs` takes a new `name_contains` (`""` for every run): a case-insensitive match on the name,
-  or the run with that id when it is all digits. (#374)
-* **Key pickers list 100 keys and find the rest as you type.** The chart editor's metric pickers and the run table's
-  Columns picker sent every key the experiment logged (about 250 KB a picker for 11,000 metrics) and filtered them in
-  the browser; they now send a page and what is picked, and search the rest on the server. (#416)
-* **A purge returns at once, and the admin page says while one is running.** The purge runs off the request, its
-  confirm button spins until it is handed off, and purging something already purged does nothing instead of failing.
-  The trash says "A purge is running" while blobs are being deleted, on whichever server process you reach, and offers
-  "Resume cleanup" only for one that stopped. Migration `0005` adds a nullable `AppState.artifact_purge_progress_at`;
-  a storage plugin implements `artifact_purge_progress_at()` and `record_artifact_purge_progress(running=)`, which
-  needs `Scope.PURGE`. (#429)
-* **The experiment page no longer sends every run's hyperparameters to the browser.** They were sent on load and again
-  on every live update that saw a change, and the runs table read them back from the browser. The table now reads them
-  itself, and its Columns picker offers the hyperparameter keys of the newest 100 runs, as the chart editor does,
-  instead of reading every run's on each keystroke; a column already shown that only an older run has stays offered.
+  A chart whose saved settings no longer validate, or whose type is not installed, reads nothing for itself rather than every metric: it shows its own error either way.
+  (#395)
+* **The chart editor draws an edit that asks for the same data without reading it again**, such as a change of a chart's height or colors, and opening the editor on a chart.
+  A write to the experiment reads it afresh.
+  (#335)
+* **A bar chart over a metric draws a bar per run.** With a metric on its x-axis (a final learning rate, say), runs that ended on the same value used to be averaged into one bar; each run is now a bar of its own, labelled with its name, with its x value in the tooltip ("lr: 0.001").
+  A hyperparameter on the x-axis still draws a bar per value.
+  (#422)
+* **Run pickers list the newest 50 runs and find the rest as you type.** The compare picker and the notes' run picker sent every run of the experiment to the browser; typing now searches the others on the server, by name or by id.
+  A storage plugin's `get_runs` takes a new `name_contains` (`""` for every run): a case-insensitive match on the name, or the run with that id when it is all digits.
+  (#374)
+* **Key pickers list 100 keys and find the rest as you type.** The chart editor's metric pickers and the run table's Columns picker sent every key the experiment logged (about 250 KB a picker for 11,000 metrics) and filtered them in the browser; they now send a page and what is picked, and search the rest on the server.
+  (#416)
+* **A purge returns at once, and the admin page says while one is running.** The purge runs off the request, its confirm button spins until it is handed off, and purging something already purged does nothing instead of failing.
+  The trash says "A purge is running" while blobs are being deleted, on whichever server process you reach, and offers "Resume cleanup" only for one that stopped.
+  Migration `0005` adds a nullable `AppState.artifact_purge_progress_at`; a storage plugin implements `artifact_purge_progress_at()` and `record_artifact_purge_progress(running=)`, which needs `Scope.PURGE`.
+  (#429)
+* **The experiment page no longer sends every run's hyperparameters to the browser.** They were sent on load and again on every live update that saw a change, and the runs table read them back from the browser.
+  The table now reads them itself, and its Columns picker offers the hyperparameter keys of the newest 100 runs, as the chart editor does, instead of reading every run's on each keystroke; a column already shown that only an older run has stays offered.
   (#454)
-* **An image chart reads its pictures a window of 50 steps at a time.** Its slider still goes to every step logged;
-  moving it past the pictures read reads the ones around where it went. For 20 runs of 2,000 steps, drawing the chart
-  went from 1.8 s to 0.2 s, and from 5 MB to 0.4 MB sent to the browser. An image chart over a metric x-axis reads
-  every picture, as before. A chart plugin asks for a window with `DataRequest.artifact_window`, and a storage plugin
-  implements `artifact_steps()` and `fetch_artifacts(..., steps=StepRange)` (see
-  [docs/plugins/charts.md](docs/plugins/charts.md)). (#364)
-* **A table with a row per value of a field says how many rows it would have past 5,000, instead of drawing them.** A
-  row per step of 20 runs of 5,000 steps was 100,000 rows and 16 MB sent to the browser. Show a row per run or per
-  epoch, or raise `DLBOARD_MAX_TABLE_ROWS`. (#364)
+* **An image chart reads its pictures a window of 50 steps at a time.** Its slider still goes to every step logged; moving it past the pictures read reads the ones around where it went.
+  For 20 runs of 2,000 steps, drawing the chart went from 1.8 s to 0.2 s, and from 5 MB to 0.4 MB sent to the browser.
+  An image chart over a metric x-axis reads every picture, as before.
+  A chart plugin asks for a window with `DataRequest.artifact_window`, and a storage plugin implements `artifact_steps()` and `fetch_artifacts(..., steps=StepRange)` (see [docs/plugins/charts.md](docs/plugins/charts.md)).
+  (#364)
+* **A table with a row per value of a field says how many rows it would have past 5,000, instead of drawing them.** A row per step of 20 runs of 5,000 steps was 100,000 rows and 16 MB sent to the browser.
+  Show a row per run or per epoch, or raise `DLBOARD_MAX_TABLE_ROWS`.
+  (#364)
 
 ### Fixed
 
-* **The navbar's runs table lines up with the experiment links above it.** It sat 10 px further in on each side. (#371)
-* **A file list of many keys draws in a second, not twenty.** Building its rows went over every key's columns for each
-  file: 10,000 checkpoints under `checkpoints/` took 17.6 s, and take 0.9 s. (#364)
+* **The navbar's runs table lines up with the experiment links above it.** It sat 10 px further in on each side.
+  (#371)
+* **A file list of many keys draws in a second, not twenty.** Building its rows went over every key's columns for each file: 10,000 checkpoints under `checkpoints/` took 17.6 s, and take 0.9 s.
+  (#364)
 
 ## [0.12.0] - 2026-10-26
 
 ### Added
 
-* **A chart can show how many metrics' values spread, as a band.** The series band chart draws, for the metrics its names
-  and patterns match, the median of their values at each step between their quartiles, inside their extremes, for the
-  newest run (up to three). Hovering a step says how many metrics logged a value and which ones were the lowest and the
-  highest, and the mean can be drawn beside the median. A pattern's wildcards can name groups (`accuracy/#,#/*` grouped
-  by 2 is a band for each class), read together. It reads a grid of at most 64 cells of steps (32 by default, and fewer
-  over thousands of metrics, to keep a read to about a second), one read per metric, run and cell and not one per step
-  a run trained, so a run that logs every 50 steps is banded as well as one that logs every step.
+* **A chart can show how many metrics' values spread, as a band.** The series band chart draws, for the metrics its names and patterns match, the median of their values at each step between their quartiles, inside their extremes, for the newest run (up to three).
+  Hovering a step says how many metrics logged a value and which ones were the lowest and the highest, and the mean can be drawn beside the median.
+  A pattern's wildcards can name groups (`accuracy/#,#/*` grouped by 2 is a band for each class), read together.
+  It reads a grid of at most 64 cells of steps (32 by default, and fewer over thousands of metrics, to keep a read to about a second), one read per metric, run and cell and not one per step a run trained, so a run that logs every 50 steps is banded as well as one that logs every step.
   Its runs are the colors they are in every other chart, in either color scheme.
-* **A metric pattern can have its `*` anywhere, and a `#` for a run of digits.** `layer_*/grad_norm` names every metric
-  of that shape, including ones logged later, and `layer_#/grad_norm` names the numbered layers and no other key. A
-  pattern used to end in `*`.
-* **`dev_harness.py seed` can log many metric keys, and times the upload.** `--metric-keys`, `--key-template` and
-  `--steps-per-batch` shape the upload, and the output reports the rows, the ingest rate, the size of the first request
-  and the size of the database.
-* **A chart plugin can ask for the spread of many metrics' values, in groups.** `hint_required_series` hands the chart a
-  `SeriesBand` per run, group and step: the minimum, quartiles, median, maximum and mean of the values its patterns
-  match, the metrics at the extremes, and how many logged a value, read on a bounded grid of steps.
+* **A metric pattern can have its `*` anywhere, and a `#` for a run of digits.** `layer_*/grad_norm` names every metric of that shape, including ones logged later, and `layer_#/grad_norm` names the numbered layers and no other key.
+  A pattern used to end in `*`.
+* **`dev_harness.py seed` can log many metric keys, and times the upload.** `--metric-keys`, `--key-template` and `--steps-per-batch` shape the upload, and the output reports the rows, the ingest rate, the size of the first request and the size of the database.
+* **A chart plugin can ask for the spread of many metrics' values, in groups.** `hint_required_series` hands the chart a `SeriesBand` per run, group and step: the minimum, quartiles, median, maximum and mean of the values its patterns match, the metrics at the extremes, and how many logged a value, read on a bounded grid of steps.
   `KeyPatterns.captures` says what each wildcard of a pattern stood for in a key, to group by.
-* **An image chart's enlarged view zooms and pans, and keeps the legend and tags.** Scroll to zoom towards the pointer,
-  drag to pan and double-click to fit; a slider with the zoom level and **Fit** and **100%** shortcuts sit over the
-  picture, and its layers stay registered to it at any zoom. The view shows the same layer legend as the thumbnails
-  (sharing the chart's state, so a layer hidden in one is hidden in the other), the chart, run (in its color) and step
-  in its header, and the picture's tags as a table beside it, in the chart's tag formats. `<` and `>` beside the picture,
-  a timeline under it and the left and right arrow keys move through the steps, and the up and down arrow keys through
-  the runs, with a spinner over the picture while the next one loads. **Download** offers its sizes on being pointed at (the
-  original size, 2x, 4x, 8x, its longest side at a number of pixels you type (1920 to begin with), or the view as it is
-  zoomed and panned to) and saves a PNG at the one clicked, with the layers shown over the picture and their legend. Scrubbing along the timeline or holding an arrow key moves the chart's slider a
-  few times a second, not on every pixel, and puts in only pictures that have loaded, so it stays as smooth as the
-  thumbnails. The legend sits in the corner of its thumbnail or of the view whatever the size of the picture, or its zoom.
+* **An image chart's enlarged view zooms and pans, and keeps the legend and tags.** Scroll to zoom towards the pointer, drag to pan and double-click to fit; a slider with the zoom level and **Fit** and **100%** shortcuts sit over the picture, and its layers stay registered to it at any zoom.
+  The view shows the same layer legend as the thumbnails (sharing the chart's state, so a layer hidden in one is hidden in the other), the chart, run (in its color) and step in its header, and the picture's tags as a table beside it, in the chart's tag formats.
+  `<` and `>` beside the picture, a timeline under it and the left and right arrow keys move through the steps, and the up and down arrow keys through the runs, with a spinner over the picture while the next one loads.
+  **Download** offers its sizes on being pointed at (the original size, 2x, 4x, 8x, its longest side at a number of pixels you type (1920 to begin with), or the view as it is zoomed and panned to) and saves a PNG at the one clicked, with the layers shown over the picture and their legend.
+  Scrubbing along the timeline or holding an arrow key moves the chart's slider a few times a second, not on every pixel, and puts in only pictures that have loaded, so it stays as smooth as the thumbnails.
+  The legend sits in the corner of its thumbnail or of the view whatever the size of the picture, or its zoom.
 
 ### Changed
 
-* **Auto-generate and Suggest charts offer a family of metrics as one band.** Metrics whose names differ only in their
-  numbers (`layer_0/grad_norm` to `layer_99/grad_norm`) are one band once there are at least 12 of them, rather than a
-  chart each. A family of 11,000 metrics is one chart.
-* **A table of a metric pattern reads only the metrics it shows.** A table of `train/*` used to read every metric in the
-  experiment.
-* **Listing an experiment's metric keys no longer judges each key's shape.** The chart editor, the auto-populate preview,
-  the suggestions drawer and the run table list names only, and a key's shape is judged only for the keys a chart is made
-  from. On an experiment of 11,000 keys and 20 runs (SQLite) the listing took 346 ms and now takes 35 ms.
-* **The suggest-charts drawer lists the first 50 suggestions, and says how many the filter leaves.** It no longer keeps
-  every suggestion's chart in the browser, which froze with thousands of metrics, and builds a chart only when it is added.
+* **Auto-generate and Suggest charts offer a family of metrics as one band.** Metrics whose names differ only in their numbers (`layer_0/grad_norm` to `layer_99/grad_norm`) are one band once there are at least 12 of them, rather than a chart each.
+  A family of 11,000 metrics is one chart.
+* **A table of a metric pattern reads only the metrics it shows.** A table of `train/*` used to read every metric in the experiment.
+* **Listing an experiment's metric keys no longer judges each key's shape.** The chart editor, the auto-populate preview, the suggestions drawer and the run table list names only, and a key's shape is judged only for the keys a chart is made from.
+  On an experiment of 11,000 keys and 20 runs (SQLite) the listing took 346 ms and now takes 35 ms.
+* **The suggest-charts drawer lists the first 50 suggestions, and says how many the filter leaves.** It no longer keeps every suggestion's chart in the browser, which froze with thousands of metrics, and builds a chart only when it is added.
   "Select all" ticks the suggestions the filter leaves, up to 200.
 * **The key pickers list the first 100 names that match what is typed.** They still search every name.
-* **A step that logged thousands of keys is uploaded in pieces of at most 1,000 keys.** Each queued item carries at most
-  1,000 keys, so a batch of items is a bounded upload however wide the steps are.
-* **Auto-generate makes at most 200 charts at once.** Keys that share no name used to make a chart each, so a catalog
-  of thousands made a page of thousands of charts. Bands, images and histograms are made first, and the metrics take
-  what is left. The keys past the limit stay uncharted, so Suggest charts can still add them, and the auto-populate
-  preview says how many it leaves out.
-* **Reading many metric keys at once is faster.** The latest value of each key, and a run's whole history, used to cost
-  a pandas pass over every key column. For one run of 32 steps in an experiment of 11,000 keys (SQLite), the latest
-  values took 1.6 s and now take 0.14 s, and the history 2.5 s and 1.1 s. An experiment of 20 keys is unchanged.
-* **The run comparison lists its keys 50 at a time.** Each page reads only its own keys' values: for five runs of 11,000
-  keys (SQLite) a page takes about 20 ms, where every change of the runs read every key (0.8 s) and sent every row to the
-  browser (1.9 MB). The search matches key names and hyperparameter values; a metric's values are no longer searched,
-  since that needed every key's latest value on each keystroke.
+* **A step that logged thousands of keys is uploaded in pieces of at most 1,000 keys.** Each queued item carries at most 1,000 keys, so a batch of items is a bounded upload however wide the steps are.
+* **Auto-generate makes at most 200 charts at once.** Keys that share no name used to make a chart each, so a catalog of thousands made a page of thousands of charts.
+  Bands, images and histograms are made first, and the metrics take what is left.
+  The keys past the limit stay uncharted, so Suggest charts can still add them, and the auto-populate preview says how many it leaves out.
+* **Reading many metric keys at once is faster.** The latest value of each key, and a run's whole history, used to cost a pandas pass over every key column.
+  For one run of 32 steps in an experiment of 11,000 keys (SQLite), the latest values took 1.6 s and now take 0.14 s, and the history 2.5 s and 1.1 s.
+  An experiment of 20 keys is unchanged.
+* **The run comparison lists its keys 50 at a time.** Each page reads only its own keys' values: for five runs of 11,000 keys (SQLite) a page takes about 20 ms, where every change of the runs read every key (0.8 s) and sent every row to the browser (1.9 MB).
+  The search matches key names and hyperparameter values; a metric's values are no longer searched, since that needed every key's latest value on each keystroke.
 
 ### Fixed
 
-* **A line chart's legend of many runs no longer squashes its plot.** The legend is held to two rows and scrolls to
-  the rest, so the plot keeps its height whatever the number of runs (the tooltip still lists every run).
-* **A line chart draws a run that has one point as a dot.** A run whose x-axis value never changes (a constant learning
-  rate against the gradient norm) is a single point, which has no line, so it was not drawn at all.
-* **A bar chart of runs labels each bar with its run's name,** as every other chart names its runs, not its id. Two runs
-  with one name stay two bars, told apart by their ids.
-* **Reading more than 500 named metric keys no longer fails on SQLite.** The latest or first value unioned one SELECT per
-  key, and SQLite refuses a union of more than 500. A read of more than 32,766 names (a pattern can name that many) also
-  failed on a stock SQLite build, which binds no more parameters than that to a statement.
-* **A run's latest value no longer costs more as the run trains, on Postgres.** The check that a value was the newest
-  logged at its step read the key's whole series for every run, so the run comparison and the latest-value panels read
-  more pages the longer a run trained.
+* **A line chart's legend of many runs no longer squashes its plot.** The legend is held to two rows and scrolls to the rest, so the plot keeps its height whatever the number of runs (the tooltip still lists every run).
+* **A line chart draws a run that has one point as a dot.** A run whose x-axis value never changes (a constant learning rate against the gradient norm) is a single point, which has no line, so it was not drawn at all.
+* **A bar chart of runs labels each bar with its run's name,** as every other chart names its runs, not its id.
+  Two runs with one name stay two bars, told apart by their ids.
+* **Reading more than 500 named metric keys no longer fails on SQLite.** The latest or first value unioned one SELECT per key, and SQLite refuses a union of more than 500.
+  A read of more than 32,766 names (a pattern can name that many) also failed on a stock SQLite build, which binds no more parameters than that to a statement.
+* **A run's latest value no longer costs more as the run trains, on Postgres.** The check that a value was the newest logged at its step read the key's whole series for every run, so the run comparison and the latest-value panels read more pages the longer a run trained.
 
 ## [0.11.0] - 2026-10-23
 
 ### Changed
 
-* **A line or bar chart no longer has a y-axis label**: its heading already names the metric, so the axis shows only its
-  values and the plot gets the room the label took. A bar chart's heading now says how its values are grouped
-  (`median(loss)`), which the label used to.
-* **The experiment page makes two fewer requests when it loads.** The run table reported its own mount as a change of
-  selection to the server, twice, and the server answered that nothing had changed; the browser now compares the
-  selection with the runs drawn and asks only when they differ.
-* **The experiment page no longer reads everything that was logged to show what it summarizes.** The lists of
-  metrics and artifacts, where each run ended up, and a bar chart or a table with a row per run used to cost more with
-  every step a run trained (and the lists, with every experiment in the database). In a Postgres with 3.6M metric rows
-  the chart editor's list of metric keys took 1.7 s and now takes about 10 ms. On the shape of
-  `examples/lightning_advanced.py` (two runs, 56k rows, SQLite) the chart editor's catalog went from 59 to 8 ms, the run
-  comparison from 569 to 9 ms and a table of every metric from 614 to 27 ms.
-  * **Indexes.** The metric and artifact tables are indexed by how they are read, `(experiment_id, key, run_id, step)`,
-    as the histogram table already was; the old ones led with `key`, so every read of one experiment scanned every
-    experiment's rows. The new ones are narrower than the old, so the database gets smaller. Runs and
-    hyperparameters are indexed by experiment too (hyperparameters had no index, so every page scanned every
-    experiment's), and each per-step table is indexed by run too, so deleting or purging a run no longer scans them.
-    **Starting the server after upgrading builds them** (migration 0004): on Postgres it builds each new index before
-    dropping the one it replaces, so reads of the metric and artifact tables wait only for the swap at the end, but
-    writes to a table (a run logging metrics) wait while its indexes are built. On a database with many millions of
-    metric rows the builds take a while, so upgrade at a quiet moment. A server still running the old version keeps
-    working against the upgraded database during a rolling upgrade, only reading as slowly as it did (as with every
-    migration, one that is stopped cannot be started again on it).
-  * **Which keys an experiment logged**, whether a metric is logged once per run, and the latest artifact of each key are
-    found by hopping through the index from key to key, not by counting and sorting every row. Whether a metric is
-    logged once per run is judged on the newest 100 runs, and the column catalog's hyperparameter keys are read from
-    those runs too, so these do not cost more as an experiment gains runs.
-  * **Where each run ended up**, in the run comparison and the Runs table's metric columns, is one probe of the index
-    per run and metric, and **a bar chart, and a table with a row per run,** are handed a row per run (the latest,
-    first, minimum, maximum or mean of each metric, as the table's aggregate says) instead of every step to reduce in
-    pandas. A bar chart now takes each run's latest x and latest value rather than needing a step that logged both:
-    the same for a hyperparameter x-axis, and no longer an empty chart for two metrics logged at different steps.
+* **A line or bar chart no longer has a y-axis label**: its heading already names the metric, so the axis shows only its values and the plot gets the room the label took.
+  A bar chart's heading now says how its values are grouped (`median(loss)`), which the label used to.
+* **The experiment page makes two fewer requests when it loads.** The run table reported its own mount as a change of selection to the server, twice, and the server answered that nothing had changed; the browser now compares the selection with the runs drawn and asks only when they differ.
+* **The experiment page no longer reads everything that was logged to show what it summarizes.** The lists of metrics and artifacts, where each run ended up, and a bar chart or a table with a row per run used to cost more with every step a run trained (and the lists, with every experiment in the database).
+  In a Postgres with 3.6M metric rows the chart editor's list of metric keys took 1.7 s and now takes about 10 ms. On the shape of `examples/lightning_advanced.py` (two runs, 56k rows, SQLite) the chart editor's catalog went from 59 to 8 ms, the run comparison from 569 to 9 ms and a table of every metric from 614 to 27 ms.
+  * **Indexes.** The metric and artifact tables are indexed by how they are read, `(experiment_id, key, run_id, step)`, as the histogram table already was; the old ones led with `key`, so every read of one experiment scanned every experiment's rows.
+    The new ones are narrower than the old, so the database gets smaller.
+    Runs and hyperparameters are indexed by experiment too (hyperparameters had no index, so every page scanned every experiment's), and each per-step table is indexed by run too, so deleting or purging a run no longer scans them.
+    **Starting the server after upgrading builds them** (migration 0004): on Postgres it builds each new index before dropping the one it replaces, so reads of the metric and artifact tables wait only for the swap at the end, but writes to a table (a run logging metrics) wait while its indexes are built.
+    On a database with many millions of metric rows the builds take a while, so upgrade at a quiet moment.
+    A server still running the old version keeps working against the upgraded database during a rolling upgrade, only reading as slowly as it did (as with every migration, one that is stopped cannot be started again on it).
+  * **Which keys an experiment logged**, whether a metric is logged once per run, and the latest artifact of each key are found by hopping through the index from key to key, not by counting and sorting every row.
+    Whether a metric is logged once per run is judged on the newest 100 runs, and the column catalog's hyperparameter keys are read from those runs too, so these do not cost more as an experiment gains runs.
+  * **Where each run ended up**, in the run comparison and the Runs table's metric columns, is one probe of the index per run and metric, and **a bar chart, and a table with a row per run,** are handed a row per run (the latest, first, minimum, maximum or mean of each metric, as the table's aggregate says) instead of every step to reduce in pandas.
+    A bar chart now takes each run's latest x and latest value rather than needing a step that logged both: the same for a hyperparameter x-axis, and no longer an empty chart for two metrics logged at different steps.
     The "fetches all metrics" badge only shows for an unscoped chart that still reads every step.
-  * **A line chart's history is cheaper per point** (a panel of 50 lines on that same data, 592 to 265 ms). It still
-    reads every point logged of its metrics, so how often you log decides how fast it draws:
-    [docs/client.md](docs/client.md) says how to log less.
-* **Logging metrics is faster, and an ingest's time shows in its trace.** A batch's metric and histogram rows are written
-  in one transaction (one commit, not three), and on Postgres with COPY, not one round trip per row. On a local Postgres (WSL2),
-  a batch of 10,000 steps of four metrics went from 4.7 s to 3.1 s; what is left is the database
-  writing each row and its index entries to its log, which a batch cannot avoid. The ingest's trace now has spans for
-  parsing the batch (`dlboard.metrics.parse`), building its rows (`dlboard.store.rows`) and writing them
-  (`dlboard.store.insert`), so the time that is not a SQL statement is visible too.
-* **An experiment page draws its newest 20 runs until told otherwise, and the Runs table lists every run.** Runs are the
-  one thing an experiment can have thousands of, and a user does not control how many. The charts used to fetch every
-  run but the few a view left out, and the table stopped at 1,000 runs, so run 1,001 could not be reached. Now a page
-  reads only the runs it draws: the newest 20 (`DLBOARD_DEFAULT_SHOWN_RUNS`), or the ones selected in the Runs table,
-  whose checkboxes decide what the charts draw. The table filters by name as well as by status and hyperparameter, and
-  its header checkbox selects only the runs a filter matches. A selection of more than `DLBOARD_MAX_SHOWN_RUNS` (100)
-  runs is refused with a notice, so no view can read every run of an experiment of thousands. A saved selection
-  leaves out the runs logged after its newest run, and the table says how many. Once runs are selected a **Newest 20**
-  button above the table returns the view to the default. A view saved before selections, with runs left out, still
-  loads and draws the newest 20 of the runs it did not leave out; Newest 20 clears its exclusions. With 2,000 runs
-  (800k rows, SQLite) three line charts take 38 ms (44 ms at 100 runs) and run compare 10 ms.
-* For chart plugin authors: **`ChartType.metric_reductions`** says how much of each metric a chart draws from, by
-  column (`MetricReductions`: a `default`, and a `by_column` for the metrics that differ), each a row per run
-  (`MetricReduction.LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) or every step. It defaults to every step, so a chart
-  type that does not say is unchanged. See [docs/plugins/charts.md](docs/plugins/charts.md). For storage plugin
-  authors: reads of what runs logged take the runs to include, `run_ids`, instead of the runs to exclude, and it is
-  required; `fetch_metrics` takes a `reduction`, which is a hint a store may ignore; `summarize_artifact_keys` is new;
-  and the key summaries' `MetricKeySummary.max_steps_per_run` is an upper bound on the steps a run logged, exactly 1
-  when no run logged two. `SQLStoreBase` implements them for SQLite and Postgres, the two dialects it is tested on.
+  * **A line chart's history is cheaper per point** (a panel of 50 lines on that same data, 592 to 265 ms).
+    It still reads every point logged of its metrics, so how often you log decides how fast it draws: [docs/client.md](docs/client.md) says how to log less.
+* **Logging metrics is faster, and an ingest's time shows in its trace.** A batch's metric and histogram rows are written in one transaction (one commit, not three), and on Postgres with COPY, not one round trip per row.
+  On a local Postgres (WSL2), a batch of 10,000 steps of four metrics went from 4.7 s to 3.1 s; what is left is the database writing each row and its index entries to its log, which a batch cannot avoid.
+  The ingest's trace now has spans for parsing the batch (`dlboard.metrics.parse`), building its rows (`dlboard.store.rows`) and writing them (`dlboard.store.insert`), so the time that is not a SQL statement is visible too.
+* **An experiment page draws its newest 20 runs until told otherwise, and the Runs table lists every run.** Runs are the one thing an experiment can have thousands of, and a user does not control how many.
+  The charts used to fetch every run but the few a view left out, and the table stopped at 1,000 runs, so run 1,001 could not be reached.
+  Now a page reads only the runs it draws: the newest 20 (`DLBOARD_DEFAULT_SHOWN_RUNS`), or the ones selected in the Runs table, whose checkboxes decide what the charts draw.
+  The table filters by name as well as by status and hyperparameter, and its header checkbox selects only the runs a filter matches.
+  A selection of more than `DLBOARD_MAX_SHOWN_RUNS` (100) runs is refused with a notice, so no view can read every run of an experiment of thousands.
+  A saved selection leaves out the runs logged after its newest run, and the table says how many.
+  Once runs are selected a **Newest 20** button above the table returns the view to the default.
+  A view saved before selections, with runs left out, still loads and draws the newest 20 of the runs it did not leave out; Newest 20 clears its exclusions.
+  With 2,000 runs (800k rows, SQLite) three line charts take 38 ms (44 ms at 100 runs) and run compare 10 ms.
+* For chart plugin authors: **`ChartType.metric_reductions`** says how much of each metric a chart draws from, by column (`MetricReductions`: a `default`, and a `by_column` for the metrics that differ), each a row per run (`MetricReduction.LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) or every step.
+  It defaults to every step, so a chart type that does not say is unchanged.
+  See [docs/plugins/charts.md](docs/plugins/charts.md).
+  For storage plugin authors: reads of what runs logged take the runs to include, `run_ids`, instead of the runs to exclude, and it is required; `fetch_metrics` takes a `reduction`, which is a hint a store may ignore; `summarize_artifact_keys` is new; and the key summaries' `MetricKeySummary.max_steps_per_run` is an upper bound on the steps a run logged, exactly 1 when no run logged two.
+  `SQLStoreBase` implements them for SQLite and Postgres, the two dialects it is tested on.
 
 ## [0.10.0] - 2026-10-21
 
 ### Added
 
-* **Segmentation masks as overlay layers.** `dlboard.client.artifacts.rle.run_length_encode` turns the class of each pixel
-  of one picture (an integer array of `height width`) into an `ImageMask`, run-length encoded with the mask's shape and
-  each class's color. Logged in an `Overlay`, an
-  image chart paints it over its picture, at the mask's `opacity` (0.5 by default, so the picture shows through): a class
-  with a color is drawn in it, and a class without one is left see-through. With no `colors` at all, a mask draws class 0
-  clear and every other class in a built-in palette (an empty `colors={}` draws nothing). An older server stores it
-  without drawing it, so upgrade the server to see masks.
-* **A table chart draws the overlays logged over a picture on its thumbnail**, as an image chart does, in a table of
-  runs, of a metric's values or of artifacts. An overlay of a picture the table shows is no column or row of its own.
-* **A legend over each of an image chart's pictures.** It lists the layers drawn on the picture, a row each: tick one to
-  show or hide it on every picture at once, without loading anything again, or shift-click it to show it alone, to
-  compare a truth with a prediction. Each row lists what its layer holds (the classes of a mask, the labels of shapes) in
-  their colors, so a class of one layer is not mistaken for another's. The eye hides every layer, and holding it or a
-  picture shows the picture without them while held; the legend starts folded to "Layers" and opens on a click, and a layer the picture has nothing
-  for is dimmed. What a viewer changes is their own, kept for the browser tab and for the view of the experiment they
-  are looking at: the chart's card says "View changed" and
-  offers **Save as default**, which writes which layers are shown into the chart's settings (into a view of your own, if
-  the page is not yours), or **Reset**.
-* **The chart editor is docked beside the panels**, not a modal over them, so the rest of the page stays in view. An
-  edited chart is drawn as the form has it in its own card, in place of the saved chart; Cancel puts it back exactly as
-  it was, and a live update never overwrites the draft. A chart being added is previewed in the pane. Its settings are
-  grouped into collapsible sections (Data, Display, and a chart type's own, such as Layers and Tags on an image chart).
-* For chart plugin authors: **`ChartType.fixed_table_rows`** lists in the editor's table settings the rows a chart draws
-  whether or not they are saved (restyleable, but not renamed or removed), **`SettingsSection`** (with `DATA_SECTION`,
-  `DISPLAY_SECTION` and `ADVANCED_SECTION`) groups a chart type's settings in the editor, and a setting's
-  `Field(title=...)` is what the editor calls it when its name as a sentence is not ("Show hyperparameters", not "Show
-  hparams"). See [docs/plugins/charts.md](docs/plugins/charts.md).
+* **Segmentation masks as overlay layers.** `dlboard.client.artifacts.rle.run_length_encode` turns the class of each pixel of one picture (an integer array of `height width`) into an `ImageMask`, run-length encoded with the mask's shape and each class's color.
+  Logged in an `Overlay`, an image chart paints it over its picture, at the mask's `opacity` (0.5 by default, so the picture shows through): a class with a color is drawn in it, and a class without one is left see-through.
+  With no `colors` at all, a mask draws class 0 clear and every other class in a built-in palette (an empty `colors={}` draws nothing).
+  An older server stores it without drawing it, so upgrade the server to see masks.
+* **A table chart draws the overlays logged over a picture on its thumbnail**, as an image chart does, in a table of runs, of a metric's values or of artifacts.
+  An overlay of a picture the table shows is no column or row of its own.
+* **A legend over each of an image chart's pictures.** It lists the layers drawn on the picture, a row each: tick one to show or hide it on every picture at once, without loading anything again, or shift-click it to show it alone, to compare a truth with a prediction.
+  Each row lists what its layer holds (the classes of a mask, the labels of shapes) in their colors, so a class of one layer is not mistaken for another's.
+  The eye hides every layer, and holding it or a picture shows the picture without them while held; the legend starts folded to "Layers" and opens on a click, and a layer the picture has nothing for is dimmed.
+  What a viewer changes is their own, kept for the browser tab and for the view of the experiment they are looking at: the chart's card says "View changed" and offers **Save as default**, which writes which layers are shown into the chart's settings (into a view of your own, if the page is not yours), or **Reset**.
+* **The chart editor is docked beside the panels**, not a modal over them, so the rest of the page stays in view.
+  An edited chart is drawn as the form has it in its own card, in place of the saved chart; Cancel puts it back exactly as it was, and a live update never overwrites the draft.
+  A chart being added is previewed in the pane.
+  Its settings are grouped into collapsible sections (Data, Display, and a chart type's own, such as Layers and Tags on an image chart).
+* For chart plugin authors: **`ChartType.fixed_table_rows`** lists in the editor's table settings the rows a chart draws whether or not they are saved (restyleable, but not renamed or removed), **`SettingsSection`** (with `DATA_SECTION`, `DISPLAY_SECTION` and `ADVANCED_SECTION`) groups a chart type's settings in the editor, and a setting's `Field(title=...)` is what the editor calls it when its name as a sentence is not ("Show hyperparameters", not "Show hparams").
+  See [docs/plugins/charts.md](docs/plugins/charts.md).
 
 ### Changed
 
-* **Upgrade every server before editing an image chart.** A chart saved with `layers` does not load on an older server,
-  which shows it as an error, and an edit made there would drop its layers.
-* **An image chart draws every overlay logged over its image**, including ones logged after the chart was made, rather
-  than only the keys listed in its `overlays` setting. The setting is replaced by `layers`, a row per layer (an
-  overlay by its name, any other artifact by its key) with a `visibility` (`shown`, `hidden` or `off`) and an `opacity`;
-  a chart saved with `overlays` opens as the rows that draw the same layers. One that left out an overlay of its image
-  now draws it (set it `off`), and an image's own overlays are drawn in key order. **The chart editor's Layers table lists
-  every layer the chart draws**, rather than only what was saved, so a layer can be hidden, turned off or added there.
-  An overlay's row is the chart's to keep: it can be restyled, but not renamed or removed (set it `off` to leave the
-  overlay out), and one left as it is by default is not saved.
-* Overlays are shown by their image and name (`samples/a · truth`; `unnamed overlay` when it has none) in an image chart's title, a
-  table's column headers and the chart editor, never by the `_$overlay` suffix they are logged under. The editor's key
-  pickers no longer offer an overlay whose image is logged, since that image's chart draws it.
-* The chart editor labels each setting as a sentence ("Tag precision", "X axis"), not by its field name; a chart type's
-  `ParameterField.label` is derived from the name, so plugins get it with no change.
+* **Upgrade every server before editing an image chart.** A chart saved with `layers` does not load on an older server, which shows it as an error, and an edit made there would drop its layers.
+* **An image chart draws every overlay logged over its image**, including ones logged after the chart was made, rather than only the keys listed in its `overlays` setting.
+  The setting is replaced by `layers`, a row per layer (an overlay by its name, any other artifact by its key) with a `visibility` (`shown`, `hidden` or `off`) and an `opacity`; a chart saved with `overlays` opens as the rows that draw the same layers.
+  One that left out an overlay of its image now draws it (set it `off`), and an image's own overlays are drawn in key order.
+  **The chart editor's Layers table lists every layer the chart draws**, rather than only what was saved, so a layer can be hidden, turned off or added there.
+  An overlay's row is the chart's to keep: it can be restyled, but not renamed or removed (set it `off` to leave the overlay out), and one left as it is by default is not saved.
+* Overlays are shown by their image and name (`samples/a · truth`; `unnamed overlay` when it has none) in an image chart's title, a table's column headers and the chart editor, never by the `_$overlay` suffix they are logged under.
+  The editor's key pickers no longer offer an overlay whose image is logged, since that image's chart draws it.
+* The chart editor labels each setting as a sentence ("Tag precision", "X axis"), not by its field name; a chart type's `ParameterField.label` is derived from the name, so plugins get it with no change.
 
 ### Deprecated
 
-* `dlboard.models.overlay_image_key` is kept for one release, as the image an overlay key is of. Use `OverlayKey.parse`,
-  which also gives the overlay's name.
+* `dlboard.models.overlay_image_key` is kept for one release, as the image an overlay key is of.
+  Use `OverlayKey.parse`, which also gives the overlay's name.
 
 ### Fixed
 
-* **Editing a chart keeps its id**, so a `?chart=` link to it still opens it. It used to be derived from the new
-  settings again on every edit. A new chart now gets an id of its own, so two charts of one config are not one chart to
-  a link.
-* Switching the chart type in the editor no longer fills the new form from the old type's settings where a name
-  (`height`) happens to match, and a number input in the editor is bounded by what its setting allows.
+* **Editing a chart keeps its id**, so a `?chart=` link to it still opens it.
+  It used to be derived from the new settings again on every edit.
+  A new chart now gets an id of its own, so two charts of one config are not one chart to a link.
+* Switching the chart type in the editor no longer fills the new form from the old type's settings where a name (`height`) happens to match, and a number input in the editor is bounded by what its setting allows.
 
 ## [0.9.0] - 2026-10-19
 
 ### Added
 
-* **Image overlays.** `dlboard.client.artifacts.overlay.Overlay` logs the shapes drawn over a picture -- boxes and
-  polygons, each with an optional label and color -- as a small JSON file, at the same step as the picture, so an
-  annotated photo can be a small JPEG rather than a large PNG with the boxes drawn in. `Overlay.over("sample", ...)`
-  logs it under `sample_$overlay` (give several of them a `name` each), and the image chart auto-generate makes for
-  `sample` draws them over each picture, in its thumbnail and its enlarged view, with no chart of its own for the
-  overlays. See [docs/client.md](docs/client.md).
-* **Layers over an image chart's pictures.** Its new `overlays` setting is a row per artifact key, bottom layer first,
-  each with an `opacity`. A layer is an overlay of shapes or any image, such as a segmentation mask, logged at the
-  picture's own step; the chart editor suggests the keys the experiment logged that can be one as a row's name is typed, and sets the opacity with a slider. An older server stores an overlay without drawing it, so upgrade the server to see them.
-* **Distributed traces** (`DLBOARD_TELEMETRY_TRACES=true`, with the `otel` extra on the server and `dlboard-client[otel]`
-  in the training environment). A batch your script ships is one trace, from the shipping process through the server,
-  its database queries and the blob writer, joined by a W3C `traceparent` header (calls to S3 are traced too, as traces of their own).
-  The server uses OpenTelemetry's own instrumentation for Flask, SQLAlchemy and botocore, and picks up any other
-  `opentelemetry-instrumentation-*` package you install, so a plugin's own client is traced too. Requests carry an
-  `X-Request-Id`, recorded on the span and the log lines (which also gain `trace_id` and `span_id`). The client needs only
-  the standard OpenTelemetry SDK and OTLP exporter (1.16 or later, no upper bound) and patches nothing in your training
-  process. Bound SQL values and credentials are never recorded. See [docs/telemetry.md](docs/telemetry.md#traces).
-* The **`docker compose` trial now also runs Grafana's `otel-lgtm` image** and sends dlboard's metrics, logs and traces to
-  it, so Grafana at <http://localhost:3000> shows them with no setup. The environment it takes is in
-  [docs/docker.md](docs/docker.md#watching-it-in-grafana).
+* **Image overlays.** `dlboard.client.artifacts.overlay.Overlay` logs the shapes drawn over a picture -- boxes and polygons, each with an optional label and color -- as a small JSON file, at the same step as the picture, so an annotated photo can be a small JPEG rather than a large PNG with the boxes drawn in.
+  `Overlay.over("sample", ...)` logs it under `sample_$overlay` (give several of them a `name` each), and the image chart auto-generate makes for `sample` draws them over each picture, in its thumbnail and its enlarged view, with no chart of its own for the overlays.
+  See [docs/client.md](docs/client.md).
+* **Layers over an image chart's pictures.** Its new `overlays` setting is a row per artifact key, bottom layer first, each with an `opacity`.
+  A layer is an overlay of shapes or any image, such as a segmentation mask, logged at the picture's own step; the chart editor suggests the keys the experiment logged that can be one as a row's name is typed, and sets the opacity with a slider.
+  An older server stores an overlay without drawing it, so upgrade the server to see them.
+* **Distributed traces** (`DLBOARD_TELEMETRY_TRACES=true`, with the `otel` extra on the server and `dlboard-client[otel]` in the training environment).
+  A batch your script ships is one trace, from the shipping process through the server, its database queries and the blob writer, joined by a W3C `traceparent` header (calls to S3 are traced too, as traces of their own).
+  The server uses OpenTelemetry's own instrumentation for Flask, SQLAlchemy and botocore, and picks up any other `opentelemetry-instrumentation-*` package you install, so a plugin's own client is traced too.
+  Requests carry an `X-Request-Id`, recorded on the span and the log lines (which also gain `trace_id` and `span_id`).
+  The client needs only the standard OpenTelemetry SDK and OTLP exporter (1.16 or later, no upper bound) and patches nothing in your training process.
+  Bound SQL values and credentials are never recorded.
+  See [docs/telemetry.md](docs/telemetry.md#traces).
+* The **`docker compose` trial now also runs Grafana's `otel-lgtm` image** and sends dlboard's metrics, logs and traces to it, so Grafana at <http://localhost:3000> shows them with no setup.
+  The environment it takes is in [docs/docker.md](docs/docker.md#watching-it-in-grafana).
 
 ### Changed
 
-* An image chart's thumbnail shows a **spinner** while the picture for the slider's step is still downloading. The old
-  picture is dimmed under it, rather than shown as if it were that step's, and the spinner goes once the new picture
-  has arrived.
-* Changed default location for logged data to the current directory for sqlite instead of the home directory to better
-mirror tensorboard behavior.
+* An image chart's thumbnail shows a **spinner** while the picture for the slider's step is still downloading.
+  The old picture is dimmed under it, rather than shown as if it were that step's, and the spinner goes once the new picture has arrived.
+* Changed default location for logged data to the current directory for sqlite instead of the home directory to better mirror tensorboard behavior.
 
 ### Fixed
 
-* **An image chart keeps working after you edit it.** Its slider and enlarged view used to stop responding until the
-  page was reloaded, because the chart editor's preview rendered the chart under the very ids the saved chart got, and
-  Dash cannot resolve a callback with two components under one id. A chart's ids now include its own id, so the preview,
-  the saved chart, and two charts of one config no longer collide.
-* A failing SQL statement's **error text no longer carries the values bound into it**, so a password, a token or a run's
-  name that was a parameter of the statement is no longer in the server's log lines (or a trace's spans) when the
-  database rejects it.
-* A run's default name is no longer the same for every run a **seeded training script** starts. Names were drawn from the
-  global `random` module, so `seed_everything` gave each run the same name, and naming a run also shifted the script's
-  own random draws. Names are now drawn from the OS.
-* **The server survives starting before its database is up**, as every container does after a host reboot (Compose's
-  `depends_on` only orders `docker compose up`). It used to give up on the first refused connection, and Granian took
-  the second quick death for a crash loop and exited, leaving a stopped server that nothing restarted. The Postgres and
-  S3 plugins now retry an endpoint that is not reachable *yet* for `DLBOARD_STARTUP_WAIT_S` (120 seconds), with a log
-  line and a trace event per attempt; a wrong password or a missing bucket still fails at once. The compose file also
-  sets `restart: unless-stopped`.
-* **A server that cannot start now says why** as one `dlboard could not start` error, with its exception, on a failed
-  `dlboard.startup` span, instead of two interleaved tracebacks on stderr that no log collector saw. The new
-  `dlboard.server.workers` metric disappearing is what to alert on: see [docs/telemetry.md](docs/telemetry.md#alerting-that-its-down).
+* **An image chart keeps working after you edit it.** Its slider and enlarged view used to stop responding until the page was reloaded, because the chart editor's preview rendered the chart under the very ids the saved chart got, and Dash cannot resolve a callback with two components under one id.
+  A chart's ids now include its own id, so the preview, the saved chart, and two charts of one config no longer collide.
+* A failing SQL statement's **error text no longer carries the values bound into it**, so a password, a token or a run's name that was a parameter of the statement is no longer in the server's log lines (or a trace's spans) when the database rejects it.
+* A run's default name is no longer the same for every run a **seeded training script** starts.
+  Names were drawn from the global `random` module, so `seed_everything` gave each run the same name, and naming a run also shifted the script's own random draws.
+  Names are now drawn from the OS.
+* **The server survives starting before its database is up**, as every container does after a host reboot (Compose's `depends_on` only orders `docker compose up`).
+  It used to give up on the first refused connection, and Granian took the second quick death for a crash loop and exited, leaving a stopped server that nothing restarted.
+  The Postgres and S3 plugins now retry an endpoint that is not reachable *yet* for `DLBOARD_STARTUP_WAIT_S` (120 seconds), with a log line and a trace event per attempt; a wrong password or a missing bucket still fails at once.
+  The compose file also sets `restart: unless-stopped`.
+* **A server that cannot start now says why** as one `dlboard could not start` error, with its exception, on a failed `dlboard.startup` span, instead of two interleaved tracebacks on stderr that no log collector saw.
+  The new `dlboard.server.workers` metric disappearing is what to alert on: see [docs/telemetry.md](docs/telemetry.md#alerting-that-its-down).
 
 ## [0.8.0] - 2026-10-16
 
 ### Added
 
-* A **table chart's rows are a setting you choose**: a run, each value of a metric (`step`, `epoch`, ...), or each
-  logged artifact. With rows of a metric, `spread_by_run` puts the runs side by side, so "a row per epoch, each
-  run's latest image of that epoch" is one table. What a run logged between two values of the metric belongs to
-  the earlier one. A metric can also be reduced to its first, minimum, maximum or mean (`aggregate`) instead of
-  its latest. See [docs/plugins/charts.md](docs/plugins/charts.md).
+* A **table chart's rows are a setting you choose**: a run, each value of a metric (`step`, `epoch`, ...), or each logged artifact.
+  With rows of a metric, `spread_by_run` puts the runs side by side, so "a row per epoch, each run's latest image of that epoch" is one table.
+  What a run logged between two values of the metric belongs to the earlier one.
+  A metric can also be reduced to its first, minimum, maximum or mean (`aggregate`) instead of its latest.
+  See [docs/plugins/charts.md](docs/plugins/charts.md).
 * A table's metrics, hyperparameters and artifacts take **names or a prefix and `*`** (`eval/*`, or `*` for all).
-  In the chart editor you can type a prefix instead of picking from the keys logged so far, and a prefix also
-  matches keys logged later.
-* **Histograms.** `DLBoardLogger.log_histograms({"grad_norm/layer1": tensor}, step=...)` logs the distribution of
-  any array, tensor or list of numbers at a step -- per-layer gradient norms, weights, per-sample losses --
-  instead of averaging it into a scalar. The values are binned **in your training process, at the call**, so only
-  bucket edges and counts (at most `DLBOARD_MAX_HISTOGRAM_BUCKETS`, 1024 by default) are sent and a bad binning slows
-  down only the script that chose it. `ExponentialBinning` (the default) puts a fixed number of buckets per power of ten on a lattice that does
-  not depend on the data, so steps and runs line up bucket for bucket; `ExplicitBinning` takes the edges you
-  give. See [docs/client.md](docs/client.md).
-* A **histogram chart** shows them as a heatmap over steps, as percentile bands, or one step at a time with a
-  slider, a row per run in that run's color. A chart reads about `DLBOARD_MAX_HISTOGRAM_STEPS` (256) steps per run however long it
-  trained, thinned in the database by a power-of-two stride, so it costs the same to open after a million steps as
-  after a thousand. Its colorscale, the share of values its bands hold, and how many rows and slider steps it draws
-  are chart settings, and its accent color and spacing are `DLBOARD_HISTOGRAM_*` settings
-  ([docs/configuration.md](docs/configuration.md)). Auto-generate and Suggest charts make a heatmap for each
-  histogram key. See [docs/plugins/charts.md](docs/plugins/charts.md).
-* A database migration (`0003`) adds the histogram table. A histogram's bucket edges and counts are stored as packed
-  binary arrays (8 bytes an edge, and a count in as few bytes as it fits), not as JSON text: about a third of the
-  space on SQLite, and none of the cost of printing and parsing every float. A server older than this ignores the
-  histograms a newer client sends, so upgrade the server first.
+  In the chart editor you can type a prefix instead of picking from the keys logged so far, and a prefix also matches keys logged later.
+* **Histograms.** `DLBoardLogger.log_histograms({"grad_norm/layer1": tensor}, step=...)` logs the distribution of any array, tensor or list of numbers at a step -- per-layer gradient norms, weights, per-sample losses -- instead of averaging it into a scalar.
+  The values are binned **in your training process, at the call**, so only bucket edges and counts (at most `DLBOARD_MAX_HISTOGRAM_BUCKETS`, 1024 by default) are sent and a bad binning slows down only the script that chose it.
+  `ExponentialBinning` (the default) puts a fixed number of buckets per power of ten on a lattice that does not depend on the data, so steps and runs line up bucket for bucket; `ExplicitBinning` takes the edges you give.
+  See [docs/client.md](docs/client.md).
+* A **histogram chart** shows them as a heatmap over steps, as percentile bands, or one step at a time with a slider, a row per run in that run's color.
+  A chart reads about `DLBOARD_MAX_HISTOGRAM_STEPS` (256) steps per run however long it trained, thinned in the database by a power-of-two stride, so it costs the same to open after a million steps as after a thousand.
+  Its colorscale, the share of values its bands hold, and how many rows and slider steps it draws are chart settings, and its accent color and spacing are `DLBOARD_HISTOGRAM_*` settings ([docs/configuration.md](docs/configuration.md)).
+  Auto-generate and Suggest charts make a heatmap for each histogram key.
+  See [docs/plugins/charts.md](docs/plugins/charts.md).
+* A database migration (`0003`) adds the histogram table.
+  A histogram's bucket edges and counts are stored as packed binary arrays (8 bytes an edge, and a count in as few bytes as it fits), not as JSON text: about a third of the space on SQLite, and none of the cost of printing and parsing every float.
+  A server older than this ignores the histograms a newer client sends, so upgrade the server first.
 
 ### Changed
 
-* A table chart's `mode` (`runs`, `pivot`, `artifacts`) is replaced by `rows`, `row_field`, `spread_by_run`,
-  `show_metrics`, `show_hparams` and `show_artifacts`. A table saved with the old settings opens as the new ones that
-  show the same table, in the chart editor too.
-* **Everything the server prints now goes through one logging setup.** Granian's own lines, and any library that
-  uses the standard `logging` (Flask, Werkzeug, SQLAlchemy, ...), are rendered like dlboard's own, so
-  `DLBOARD_LOG_FORMAT=json` is JSON throughout, `DLBOARD_LOG_LEVEL` governs Granian's too, and
-  `DLBOARD_TELEMETRY_LOGS` forwards them. A library's records appear from `WARNING` up.
+* A table chart's `mode` (`runs`, `pivot`, `artifacts`) is replaced by `rows`, `row_field`, `spread_by_run`, `show_metrics`, `show_hparams` and `show_artifacts`.
+  A table saved with the old settings opens as the new ones that show the same table, in the chart editor too.
+* **Everything the server prints now goes through one logging setup.** Granian's own lines, and any library that uses the standard `logging` (Flask, Werkzeug, SQLAlchemy, ...), are rendered like dlboard's own, so `DLBOARD_LOG_FORMAT=json` is JSON throughout, `DLBOARD_LOG_LEVEL` governs Granian's too, and `DLBOARD_TELEMETRY_LOGS` forwards them.
+  A library's records appear from `WARNING` up.
 
 ### Fixed
 
-* A table chart can show **no hyperparameters** (or no metrics): an empty list used to mean "all", so choosing
-  only an artifact brought every hyperparameter and metric along. New tables still start with all of both.
-* **An error the server didn't handle is logged where you will see it.** It used to be left to Flask's own logger:
-  unstructured, with no request id, and absent from JSON and OTLP logs. It is now one event, with the method, path
-  and `request_id`, and the client's error for that request names the same id (`server request id ...`), so a
-  failed batch points at its log line.
+* A table chart can show **no hyperparameters** (or no metrics): an empty list used to mean "all", so choosing only an artifact brought every hyperparameter and metric along.
+  New tables still start with all of both.
+* **An error the server didn't handle is logged where you will see it.** It used to be left to Flask's own logger: unstructured, with no request id, and absent from JSON and OTLP logs.
+  It is now one event, with the method, path and `request_id`, and the client's error for that request names the same id (`server request id ...`), so a failed batch points at its log line.
 * Starting the server no longer prints `RuntimeWarning: Repeated configuration attempted` once per worker.
 
 ## [0.7.0] - 2026-10-14
 
 ### Added
 
-* A line or bar chart is titled with its full metric name, above the chart. The y-axis title is still
-  shortened to fit, so a long name was hard to read.
-* A **table chart can show artifacts**. In its new `artifacts` mode it lists one row per logged artifact under a
-  key, or every key under a prefix (`eval/`, including keys logged later), with each tag as a column that
-  sorts and filters as the number or text it is -- images as thumbnails, other files as download links. In
-  `runs` mode its `artifacts` setting adds a column per key with each run's latest artifact. A tag measured in
-  a unit is shown in its base unit (seconds, bytes) in a table, so runs compare. See
-  [docs/plugins/charts.md](docs/plugins/charts.md).
-* A table chart's **`mode`** (`runs` or `pivot`, besides `artifacts`) is now a setting of its own instead of
-  being implied by `pivot_on`; a table saved with `pivot_on` and no `mode` still loads as a pivot, and a pivot
-  without `pivot_on` and `pivot_metric` is a form error in the chart editor.
-* A table chart names and colors its runs as the charts and the Runs table do (a pinned **Run** column, run
-  names as pivot headers), groups its columns, filters in place, and **keeps its sort, filters and page when a
-  live update redraws it** (it used to start over every time).
+* A line or bar chart is titled with its full metric name, above the chart.
+  The y-axis title is still shortened to fit, so a long name was hard to read.
+* A **table chart can show artifacts**.
+  In its new `artifacts` mode it lists one row per logged artifact under a key, or every key under a prefix (`eval/`, including keys logged later), with each tag as a column that sorts and filters as the number or text it is -- images as thumbnails, other files as download links.
+  In `runs` mode its `artifacts` setting adds a column per key with each run's latest artifact.
+  A tag measured in a unit is shown in its base unit (seconds, bytes) in a table, so runs compare.
+  See [docs/plugins/charts.md](docs/plugins/charts.md).
+* A table chart's **`mode`** (`runs` or `pivot`, besides `artifacts`) is now a setting of its own instead of being implied by `pivot_on`; a table saved with `pivot_on` and no `mode` still loads as a pivot, and a pivot without `pivot_on` and `pivot_metric` is a form error in the chart editor.
+* A table chart names and colors its runs as the charts and the Runs table do (a pinned **Run** column, run names as pivot headers), groups its columns, filters in place, and **keeps its sort, filters and page when a live update redraws it** (it used to start over every time).
 
 ### Fixed
 
-* A table chart showed each run's *last row* rather than each metric's own latest value, so a metric logged
-  less often than the last step (a per-epoch `val_acc` beside a per-step `loss`) was blank; it now agrees with
-  the Runs table. It also no longer shows `step` as a metric, shows only hyperparameters when only those are
-  chosen, keeps an hparam and a metric of the same name apart, and reads a metric named `a.b` as one column.
-* Numbers in tables: whole numbers are shown as they are (not `12.000`) and small ones to four significant
-  digits (a learning rate of `1e-4` was `0.000`).
-* A live update redrew charts it should not have (another run logging a step renumbered the rows a chart was
-  compared by) and missed ones it should have (a hyperparameter edited, a run renamed).
+* A table chart showed each run's *last row* rather than each metric's own latest value, so a metric logged less often than the last step (a per-epoch `val_acc` beside a per-step `loss`) was blank; it now agrees with the Runs table.
+  It also no longer shows `step` as a metric, shows only hyperparameters when only those are chosen, keeps an hparam and a metric of the same name apart, and reads a metric named `a.b` as one column.
+* Numbers in tables: whole numbers are shown as they are (not `12.000`) and small ones to four significant digits (a learning rate of `1e-4` was `0.000`).
+* A live update redrew charts it should not have (another run logging a step renumbered the rows a chart was compared by) and missed ones it should have (a hyperparameter edited, a run renamed).
 
 ### Changed
 
-* **Which panels are open and which tab is shown are part of the page's address** (`?open=`, `?tab=`), like the
-  page of panels already was, instead of being saved on the experiment's page or view. Opening a panel used to
-  open it for everyone else looking at the same page; now a link you share shows what you were looking at, and
-  a fresh visit opens the first panel of the first tab. Pages saved before still load -- the open panels and
-  tab they recorded are just no longer read.
-* Changing anything about the shared page, its settings included (the runs it leaves out, its Runs-table
-  columns), now takes an editor, as changing its panels already did. A viewer's edit still branches into a view
-  of their own.
+* **Which panels are open and which tab is shown are part of the page's address** (`?open=`, `?tab=`), like the page of panels already was, instead of being saved on the experiment's page or view.
+  Opening a panel used to open it for everyone else looking at the same page; now a link you share shows what you were looking at, and a fresh visit opens the first panel of the first tab.
+  Pages saved before still load -- the open panels and tab they recorded are just no longer read.
+* Changing anything about the shared page, its settings included (the runs it leaves out, its Runs-table columns), now takes an editor, as changing its panels already did.
+  A viewer's edit still branches into a view of their own.
 
 ## [0.6.0] 2026-10-13
 
 ### Added
 
-* A panel's **Sync crosshair and step across charts** setting now also locks its image-series sliders
-  together: moving one moves the others to the latest step each has at or before it.
+* A panel's **Sync crosshair and step across charts** setting now also locks its image-series sliders together: moving one moves the others to the latest step each has at or before it.
 * An image-series chart is titled with its artifact key.
-* A tag can carry a unit: `tags={"took": Quantity(value=5400, unit=TimeUnit.SECONDS)}` records what the
-  number was measured in (time `ns` to `d`, size `B` to `TB`, decimal); on the wire it is
-  `{"value": 5400, "unit": "s"}`. The client never says how to show it: the image chart shows it in the
-  largest unit that fits by default (`1.500 h`, `2.500 GB`, not `5400` or `2500000000`), or in the unit set
-  by its new `tag_time_unit` / `tag_size_unit` settings, to `tag_precision` significant digits, and
-  `tag_display` overrides those per tag name. Plain
-  numbers are written with separators (`12,346`) instead of `1.235e+04`.
-* Opt-in OpenTelemetry for enterprise deployments. `DLBOARD_TELEMETRY_METRICS=prometheus,otlp` exports the
-  server's own metrics (HTTP requests and latency, metric and artifact ingest, the artifact write queue, run
-  lifecycle, sign-ins, artifact purges) either as a Prometheus scrape of `/metrics` -- added up across every
-  worker -- or pushed over OTLP to a collector, Mimir or Grafana Cloud, and `DLBOARD_TELEMETRY_LOGS` sends the
-  logs over OTLP too (Loki). It is the new `otel` extra (OpenTelemetry SDK 1.25 or later, 1.38 for logs),
-  installed in the Docker image; with none of it set nothing is imported or logged, and every process (each
-  Granian worker and its artifact writer) sets itself up on first use, so a collector that is down never stops
-  the server from starting. Telemetry never takes down what it measures: a failure to record is logged once and
-  skipped, and a setup that failed is retried with a back-off. The metrics API is public, as
-  `dlboard.serve.telemetry`, for plugins to record their own. See [docs/telemetry.md](docs/telemetry.md).
-* Docker images between releases: `ghcr.io/dlangerm/dlboard:beta` follows main (and `sha-<commit>` pins a
-  single landing), `:latest` is the same tested `main`, and `:stable` follows the newest release.
+* A tag can carry a unit: `tags={"took": Quantity(value=5400, unit=TimeUnit.SECONDS)}` records what the number was measured in (time `ns` to `d`, size `B` to `TB`, decimal); on the wire it is `{"value": 5400, "unit": "s"}`.
+  The client never says how to show it: the image chart shows it in the largest unit that fits by default (`1.500 h`, `2.500 GB`, not `5400` or `2500000000`), or in the unit set by its new `tag_time_unit` / `tag_size_unit` settings, to `tag_precision` significant digits, and `tag_display` overrides those per tag name.
+  Plain numbers are written with separators (`12,346`) instead of `1.235e+04`.
+* Opt-in OpenTelemetry for enterprise deployments.
+  `DLBOARD_TELEMETRY_METRICS=prometheus,otlp` exports the server's own metrics (HTTP requests and latency, metric and artifact ingest, the artifact write queue, run lifecycle, sign-ins, artifact purges) either as a Prometheus scrape of `/metrics` -- added up across every worker -- or pushed over OTLP to a collector, Mimir or Grafana Cloud, and `DLBOARD_TELEMETRY_LOGS` sends the logs over OTLP too (Loki).
+  It is the new `otel` extra (OpenTelemetry SDK 1.25 or later, 1.38 for logs), installed in the Docker image; with none of it set nothing is imported or logged, and every process (each Granian worker and its artifact writer) sets itself up on first use, so a collector that is down never stops the server from starting.
+  Telemetry never takes down what it measures: a failure to record is logged once and skipped, and a setup that failed is retried with a back-off.
+  The metrics API is public, as `dlboard.serve.telemetry`, for plugins to record their own.
+  See [docs/telemetry.md](docs/telemetry.md).
+* Docker images between releases: `ghcr.io/dlangerm/dlboard:beta` follows main (and `sha-<commit>` pins a single landing), `:latest` is the same tested `main`, and `:stable` follows the newest release.
   See [docs/docker.md](docs/docker.md).
 
 ### Fixed
 
-* Live updates replaced a chart's whole item with a whole new item nested inside it (a second set of
-  controls and padding) the first time its data moved, and redrew *every* open chart on the first update
-  after a page loaded, including ones whose data had not changed. A chart now carries a fingerprint of the
-  data it was drawn from, so a poll replaces only the chart inside its item, and only when its data moved.
-* A request the sign-in gate turned away (a `401`, or the redirect to the sign-in page) had no request id, and
-  with `DLBOARD_ACCESS_LOG` on its response raised an error instead of being logged.
-* Pressing Ctrl+C during training left the process hung for a minute per unshipped queue, with "still hadn't
-  all been shipped" and "shipping process is dead" warnings. The terminal's Ctrl+C reached the logger's
-  background shipping processes too, so they died before the final flush could send what was queued. They now
-  ignore Ctrl+C, and the training process flushes and exits.
+* Live updates replaced a chart's whole item with a whole new item nested inside it (a second set of controls and padding) the first time its data moved, and redrew *every* open chart on the first update after a page loaded, including ones whose data had not changed.
+  A chart now carries a fingerprint of the data it was drawn from, so a poll replaces only the chart inside its item, and only when its data moved.
+* A request the sign-in gate turned away (a `401`, or the redirect to the sign-in page) had no request id, and with `DLBOARD_ACCESS_LOG` on its response raised an error instead of being logged.
+* Pressing Ctrl+C during training left the process hung for a minute per unshipped queue, with "still hadn't all been shipped" and "shipping process is dead" warnings.
+  The terminal's Ctrl+C reached the logger's background shipping processes too, so they died before the final flush could send what was queued.
+  They now ignore Ctrl+C, and the training process flushes and exits.
 
 ### Changed
 
-* **The `latest` Docker tag no longer means "the newest release"**: it now follows `main` (the same as
-  `:beta`). Pin `:stable` (or a version, `:0.5.0`) for releases only.
-* An image-series chart lays its runs out by what its panel and page say: as many columns as the panel's
-  grid column count (following it the instant it changes) and as many runs per page as the viewer's
-  charts-per-page size, instead of a fixed three and six. It never uses more columns than it has runs, so one
-  run's image fills the chart's width and a large chart size now enlarges it.
-* Artifact `tags` values are JSON scalars (`str | int | float | bool`) on the wire and in storage, not
-  text (#179): `NewArtifact.tags` is `dict[str, TagValue]`, clients send what the caller logged
-  (`tags={"score": 0.14}`), and the image-series and file-list charts format numbers the same way wherever
-  they come from. **A server older than this release rejects a numeric tag with a 400**, so upgrade the
-  server before the clients; existing string tags are unaffected. This replaces the text-only storage
-  described under 0.5.0.
+* **The `latest` Docker tag no longer means "the newest release"**: it now follows `main` (the same as `:beta`).
+  Pin `:stable` (or a version, `:0.5.0`) for releases only.
+* An image-series chart lays its runs out by what its panel and page say: as many columns as the panel's grid column count (following it the instant it changes) and as many runs per page as the viewer's charts-per-page size, instead of a fixed three and six.
+  It never uses more columns than it has runs, so one run's image fills the chart's width and a large chart size now enlarges it.
+* Artifact `tags` values are JSON scalars (`str | int | float | bool`) on the wire and in storage, not text (#179): `NewArtifact.tags` is `dict[str, TagValue]`, clients send what the caller logged (`tags={"score": 0.14}`), and the image-series and file-list charts format numbers the same way wherever they come from.
+  **A server older than this release rejects a numeric tag with a 400**, so upgrade the server before the clients; existing string tags are unaffected.
+  This replaces the text-only storage described under 0.5.0.
 
 ## [0.5.0] - 2026-10-11
 
 ### Added
 
-* The experiment page pages its panels and charts, so its cost no longer grows with the experiment (#168: 886
-  charts took about 30 s). It shows one page of the active tab's panels (default 10) with a pager, and a
-  fuzzy filter on panel names (`vl` finds `val/loss`); inside a panel, one page of its charts (default 12), with
-  a filter on the metric and artifact names they show. Only the charts on screen are fetched, on load and on
-  every live-update poll. The page and filters are in the URL (`?panels_page=`, `?panels_q=`, `?charts=`), so a
-  link reproduces what you were looking at, and a `?chart=` link lands on the page holding that chart. How many
-  panels and charts per page is each viewer's own choice, kept in a `dlboard_page_sizes` cookie.
-* A page left open across an upgrade offers a **Reload** prompt instead of failing every live-update poll: the
-  server answers a callback request in an older shape with a `409` (not Dash's bare `500`), and the page
-  shows the prompt once.
-* A run's checkpoints are one list, not one chart per file. The file list takes a `key_prefix`
-  (`checkpoints/`) in place of a `key` and shows every key under it, including ones logged later; Auto-generate
-  and Suggest charts make exactly that for a directory of files, so a run that kept hundreds of checkpoints no
-  longer gets hundreds of charts. The list is paged and sortable, and splits into `Latest`, `Best` and `Top-k`
-  tabs from the tags `DLBoardLogger` records (any other file kind gets its own tab). A view with a
-  `key_prefix` chart is not valid on an older server, so it can't be opened after a downgrade; the `height`
-  setting no longer does anything (the list pages instead of scrolling) but is still accepted.
+* The experiment page pages its panels and charts, so its cost no longer grows with the experiment (#168: 886 charts took about 30 s).
+  It shows one page of the active tab's panels (default 10) with a pager, and a fuzzy filter on panel names (`vl` finds `val/loss`); inside a panel, one page of its charts (default 12), with a filter on the metric and artifact names they show.
+  Only the charts on screen are fetched, on load and on every live-update poll.
+  The page and filters are in the URL (`?panels_page=`, `?panels_q=`, `?charts=`), so a link reproduces what you were looking at, and a `?chart=` link lands on the page holding that chart.
+  How many panels and charts per page is each viewer's own choice, kept in a `dlboard_page_sizes` cookie.
+* A page left open across an upgrade offers a **Reload** prompt instead of failing every live-update poll: the server answers a callback request in an older shape with a `409` (not Dash's bare `500`), and the page shows the prompt once.
+* A run's checkpoints are one list, not one chart per file.
+  The file list takes a `key_prefix` (`checkpoints/`) in place of a `key` and shows every key under it, including ones logged later; Auto-generate and Suggest charts make exactly that for a directory of files, so a run that kept hundreds of checkpoints no longer gets hundreds of charts.
+  The list is paged and sortable, and splits into `Latest`, `Best` and `Top-k` tabs from the tags `DLBoardLogger` records (any other file kind gets its own tab).
+  A view with a `key_prefix` chart is not valid on an older server, so it can't be opened after a downgrade; the `height` setting no longer does anything (the list pages instead of scrolling) but is still accepted.
 
 ### Changed
 
-* Only the active tab renders; the other tabs' panels are no longer fetched and drawn behind it. Dragging a
-  panel or chart to reorder it now rebuilds the page of panels (or charts) being shown, rather than moving the
-  nodes already on screen, so it can only be dropped among what is showing. Opening and closing a panel keeps
-  the open state of the panels on other pages and tabs.
-* Line charts render much faster on a panel with many charts: the server no longer copies and scans the whole
-  panel's data once per chart (200 charts took 99 s of server time, now 4.6 s).
-* Chart axes are readable: the value axis has room for its ticks beside the rotated title, ticks show at most
-  four significant digits (no more `0.30000000000000004`), and a line chart's tooltip is titled with the whole
-  metric name, which the axis title may shorten.
-* The panel menu button is a sliders icon rather than three dots (which read as one more drag handle next to
-  the grip), the header is padded off the panel's right border, and each button that rebuilds the panel area
-  (create, rename, delete) spins until it finishes.
-* `dlboard` now depends on `dlboard-client~=X.Y.0`, a client of its own minor version, instead of any
-  version, so an environment holding both can no longer end up with a mismatched pair.
-* `DataStore.fetch_artifacts` takes a `key_prefixes` keyword (default none) that also selects every artifact whose
-  key starts with one of the prefixes, and `ChartType.hint_required_artifact_key_prefixes` lets a chart ask for
-  them. A custom `DataStore` must accept the new keyword; a custom `ChartType` needs no change.
+* Only the active tab renders; the other tabs' panels are no longer fetched and drawn behind it.
+  Dragging a panel or chart to reorder it now rebuilds the page of panels (or charts) being shown, rather than moving the nodes already on screen, so it can only be dropped among what is showing.
+  Opening and closing a panel keeps the open state of the panels on other pages and tabs.
+* Line charts render much faster on a panel with many charts: the server no longer copies and scans the whole panel's data once per chart (200 charts took 99 s of server time, now 4.6 s).
+* Chart axes are readable: the value axis has room for its ticks beside the rotated title, ticks show at most four significant digits (no more `0.30000000000000004`), and a line chart's tooltip is titled with the whole metric name, which the axis title may shorten.
+* The panel menu button is a sliders icon rather than three dots (which read as one more drag handle next to the grip), the header is padded off the panel's right border, and each button that rebuilds the panel area (create, rename, delete) spins until it finishes.
+* `dlboard` now depends on `dlboard-client~=X.Y.0`, a client of its own minor version, instead of any version, so an environment holding both can no longer end up with a mismatched pair.
+* `DataStore.fetch_artifacts` takes a `key_prefixes` keyword (default none) that also selects every artifact whose key starts with one of the prefixes, and `ChartType.hint_required_artifact_key_prefixes` lets a chart ask for them.
+  A custom `DataStore` must accept the new keyword; a custom `ChartType` needs no change.
 
 ## [0.4.0] - 2026-10-09
 
 ### Added
 
-* A run records how it ended and when. `DLBoardLogger.finalize` reports `"success"` as *finished* and
-  `"failed"` as *failed* (`POST /api/v1/runs/<id>/finish`, a new path), stamped with the client's clock; the
-  runs table gets a compact **Status** column (`running`, `3m 23s`, `2d 3h`, `✕ 1h 2m`) that sorts by
-  duration and filters by status. A script that exits without finalizing the logger is recorded as *unknown*;
-  a process killed outright never reports, so its run stays *running*. Two nullable columns are
-  added to `Run` by migration `0002` (expand-only: run `dlboard` servers upgrade first, as always); an older
-  server answers 404 to the new path and the client carries on.
-* **Suggest charts** is a selection list, not one add button per key: a filter (by key or target panel), a
-  By name / By panel sort, **Select all** and **Clear** for what the filter shows, and **Add selected (N)**,
-  which adds everything ticked in a single page update (65 charts at once on the advanced example, instead of
-  65 clicks and 65 rebuilds). The one-click add on each row is still there.
-* Artifact `tags` (on `Image`, `Figure`, `File`, `Link` and anything implementing `AnyArtifact`) accept
-  numbers and booleans as well as strings, and format them identically wherever they come from (floats to
-  four significant digits). Callers no longer stringify, and so no longer disagree. Tags are still stored
-  as text -- a numeric tag would be rejected by an older server, which the supported version skew allows.
-* `DLBoardLogger` flattens nested hyperparameters, like Lightning's own loggers do: a pydantic model,
-  a pydantic or stdlib dataclass, a `Namespace` or a plain dict, nested however deeply, is logged as
-  `parent/child` keys instead of being rejected. Pydantic does the serializing, so a model's own
-  aliases and field serializers apply. Lists are stored as a JSON string. See `flatten_hparams`.
-* `DLBoardLogger(log_model=...)` uploads `ModelCheckpoint` checkpoints, like the MLflow and W&B
-  loggers: `"all"` as each one is saved, `True` only the ones kept once training finishes. Backed by
-  the new `dlboard.client.artifacts.file.File` artifact kind, which uploads a file in place and tags
-  what it is (`FileKind.CHECKPOINT`).
-* `examples/lightning_advanced.py`: a 25-epoch UNet on synthetic shapes with nested hyperparameters,
-  Lightning's learning-rate, throughput and device-stats callbacks, checkpoints, and segmentation and
-  bounding-box previews -- a deliberately heavy run for exercising the UI.
+* A run records how it ended and when.
+  `DLBoardLogger.finalize` reports `"success"` as *finished* and `"failed"` as *failed* (`POST /api/v1/runs/<id>/finish`, a new path), stamped with the client's clock; the runs table gets a compact **Status** column (`running`, `3m 23s`, `2d 3h`, `✕ 1h 2m`) that sorts by duration and filters by status.
+  A script that exits without finalizing the logger is recorded as *unknown*; a process killed outright never reports, so its run stays *running*.
+  Two nullable columns are added to `Run` by migration `0002` (expand-only: run `dlboard` servers upgrade first, as always); an older server answers 404 to the new path and the client carries on.
+* **Suggest charts** is a selection list, not one add button per key: a filter (by key or target panel), a By name / By panel sort, **Select all** and **Clear** for what the filter shows, and **Add selected (N)**, which adds everything ticked in a single page update (65 charts at once on the advanced example, instead of 65 clicks and 65 rebuilds).
+  The one-click add on each row is still there.
+* Artifact `tags` (on `Image`, `Figure`, `File`, `Link` and anything implementing `AnyArtifact`) accept numbers and booleans as well as strings, and format them identically wherever they come from (floats to four significant digits).
+  Callers no longer stringify, and so no longer disagree.
+  Tags are still stored as text -- a numeric tag would be rejected by an older server, which the supported version skew allows.
+* `DLBoardLogger` flattens nested hyperparameters, like Lightning's own loggers do: a pydantic model, a pydantic or stdlib dataclass, a `Namespace` or a plain dict, nested however deeply, is logged as `parent/child` keys instead of being rejected.
+  Pydantic does the serializing, so a model's own aliases and field serializers apply.
+  Lists are stored as a JSON string.
+  See `flatten_hparams`.
+* `DLBoardLogger(log_model=...)` uploads `ModelCheckpoint` checkpoints, like the MLflow and W&B loggers: `"all"` as each one is saved, `True` only the ones kept once training finishes.
+  Backed by the new `dlboard.client.artifacts.file.File` artifact kind, which uploads a file in place and tags what it is (`FileKind.CHECKPOINT`).
+* `examples/lightning_advanced.py`: a 25-epoch UNet on synthetic shapes with nested hyperparameters, Lightning's learning-rate, throughput and device-stats callbacks, checkpoints, and segmentation and bounding-box previews -- a deliberately heavy run for exercising the UI.
 
 ### Changed
 
-* A checkpoint (anything logged as a `File`) now gets a **file list** with download links when charts are
-  auto-generated or suggested, instead of an image chart full of broken images. It's the new built-in
-  `files` chart type. Chart types now say which artifacts they can display (`ChartType.can_display_artifact`),
-  and an artifact no chart type claims gets no generated chart at all.
-* `Image` artifacts are encoded as lossless PNG by default instead of always as lossy JPEG, so masks,
-  label images and overlays are no longer degraded on upload. Pass `format="jpg"` to keep the old,
-  smaller files. Artifacts already stored are unchanged.
+* A checkpoint (anything logged as a `File`) now gets a **file list** with download links when charts are auto-generated or suggested, instead of an image chart full of broken images.
+  It's the new built-in `files` chart type.
+  Chart types now say which artifacts they can display (`ChartType.can_display_artifact`), and an artifact no chart type claims gets no generated chart at all.
+* `Image` artifacts are encoded as lossless PNG by default instead of always as lossy JPEG, so masks, label images and overlays are no longer degraded on upload.
+  Pass `format="jpg"` to keep the old, smaller files.
+  Artifacts already stored are unchanged.
 * A panel's header shows how many charts it holds, so you can tell how big it is before expanding it.
 
 ### Fixed
 
-* `dlboard` and `dlboard-client` now import together when each is installed into its own directory on `sys.path`, as
-  hermetic builds such as Bazel do. The client's regular `dlboard` package used to hide the server's half
-  (`dlboard.serve`, `dlboard.plugins`), so depending on `dlboard` failed to import it. `dlboard/__init__.py` now
-  extends its `__path__` with `pkgutil.extend_path`. Ordinary single-directory installs are unaffected.
-* Creating charts with **Auto-generate** no longer makes the page wait for the first panel to draw when that panel
-  is big. A panel opens by itself only if it holds 12 charts or fewer (otherwise the first small one does,
-  or none); a big panel stays closed with its chart count on its header. On a run with 886 charts the
-  default grouping now shows its panels in about 1.6 s instead of 5.8 s.
-* Switching **Prefix**/**Suffix** in the Auto-generate charts dialog no longer freezes the page for seconds on an
-  experiment with many metrics: the preview lists the first 20 panels and counts the rest (239 panels took
-  the browser about 3 s to draw; it takes about 0.1 s now).
-* Changing a Grid panel's charts-per-row no longer rebuilds every chart in the panel. The browser applies the
-  new column count itself and the server only saves it, so a panel with over a hundred charts freezes the
-  page for about a quarter of the time (0.8s instead of 3s per click, measured on 126 charts).
-* A chart could show the wrong image when the browser had visited another dlboard database at the same
-  address (a wiped or restored database, or a different `--sqlite-location`). Artifact URLs are keyed by
-  id, ids start over in a new database, and the browser was told to cache them for a year; so artifact
-  `5` of the old database was shown in place of artifact `5` of the new one. Artifact URLs now carry a
-  version token (`?v=`) that changes with the artifact behind the id.
-* A long metric name no longer spills its y-axis title out of the chart (over the chart header and the
-  charts beside it): titles are shortened to fit, keeping the end of the name. How long a title may be is a
-  setting of the line and bar charts (`max_axis_label_chars`, 36 by default).
-* Metrics and artifacts logged by a later stage were never shipped when a script exited right after
-  it -- notably everything `trainer.test` logs after `trainer.fit`. Lightning finalizes the logger
-  after every stage, but only the first call flushed.
+* `dlboard` and `dlboard-client` now import together when each is installed into its own directory on `sys.path`, as hermetic builds such as Bazel do.
+  The client's regular `dlboard` package used to hide the server's half (`dlboard.serve`, `dlboard.plugins`), so depending on `dlboard` failed to import it.
+  `dlboard/__init__.py` now extends its `__path__` with `pkgutil.extend_path`.
+  Ordinary single-directory installs are unaffected.
+* Creating charts with **Auto-generate** no longer makes the page wait for the first panel to draw when that panel is big.
+  A panel opens by itself only if it holds 12 charts or fewer (otherwise the first small one does, or none); a big panel stays closed with its chart count on its header.
+  On a run with 886 charts the default grouping now shows its panels in about 1.6 s instead of 5.8 s.
+* Switching **Prefix**/**Suffix** in the Auto-generate charts dialog no longer freezes the page for seconds on an experiment with many metrics: the preview lists the first 20 panels and counts the rest (239 panels took the browser about 3 s to draw; it takes about 0.1 s now).
+* Changing a Grid panel's charts-per-row no longer rebuilds every chart in the panel.
+  The browser applies the new column count itself and the server only saves it, so a panel with over a hundred charts freezes the page for about a quarter of the time (0.8s instead of 3s per click, measured on 126 charts).
+* A chart could show the wrong image when the browser had visited another dlboard database at the same address (a wiped or restored database, or a different `--sqlite-location`).
+  Artifact URLs are keyed by id, ids start over in a new database, and the browser was told to cache them for a year; so artifact `5` of the old database was shown in place of artifact `5` of the new one.
+  Artifact URLs now carry a version token (`?v=`) that changes with the artifact behind the id.
+* A long metric name no longer spills its y-axis title out of the chart (over the chart header and the charts beside it): titles are shortened to fit, keeping the end of the name.
+  How long a title may be is a setting of the line and bar charts (`max_axis_label_chars`, 36 by default).
+* Metrics and artifacts logged by a later stage were never shipped when a script exited right after it -- notably everything `trainer.test` logs after `trainer.fit`.
+  Lightning finalizes the logger after every stage, but only the first call flushed.
 
 ## [0.3.1] - 2026-10-08
 
@@ -1130,25 +882,19 @@ mirror tensorboard behavior.
 
 ### Added
 
-* `DLBoardLogger.log_figure(figure, key, step)`, a near drop-in for `mlflow.log_figure`: renders a
-  matplotlib figure (a lossless PNG by default, or whatever supported extension the key ends in) and
-  logs it as an image-series artifact. Backed by the new
-  `dlboard.client.artifacts.figure.Figure` artifact kind.
-* Run compare: a **Compare** button above the experiment's run table opens a modal that diffs up to
-  five runs' hyperparameters and latest metric values, as differences only or every key, with a
-  search box over keys and values. Differing cells are highlighted against the first run picked.
-  The picked runs, mode and search are kept in the URL, so copying the address (or the modal's link
-  button) shares exactly what you're looking at.
-* `DLBOARD_SESSION_CLOCK_SKEW_SECONDS` (default `120`): how far ahead of a replica's own clock a
-  session cookie may be dated and still be accepted. See [docs/configuration.md](docs/configuration.md).
+* `DLBoardLogger.log_figure(figure, key, step)`, a near drop-in for `mlflow.log_figure`: renders a matplotlib figure (a lossless PNG by default, or whatever supported extension the key ends in) and logs it as an image-series artifact.
+  Backed by the new `dlboard.client.artifacts.figure.Figure` artifact kind.
+* Run compare: a **Compare** button above the experiment's run table opens a modal that diffs up to five runs' hyperparameters and latest metric values, as differences only or every key, with a search box over keys and values.
+  Differing cells are highlighted against the first run picked.
+  The picked runs, mode and search are kept in the URL, so copying the address (or the modal's link button) shares exactly what you're looking at.
+* `DLBOARD_SESSION_CLOCK_SKEW_SECONDS` (default `120`): how far ahead of a replica's own clock a session cookie may be dated and still be accepted.
+  See [docs/configuration.md](docs/configuration.md).
 
 ### Fixed
 
-* People are no longer randomly signed out, or bounced with a 400 from the login form, when a
-  session cookie was signed by a replica (or a clock) a moment ahead of the one reading it. Flask
-  rejected such a cookie outright and treated the browser as signed out; under several replicas, or
-  across a clock step, that hit perfectly good sessions. Only the lower bound is relaxed -- a cookie
-  older than the session lifetime still expires as before, and revoking a session is unaffected.
+* People are no longer randomly signed out, or bounced with a 400 from the login form, when a session cookie was signed by a replica (or a clock) a moment ahead of the one reading it.
+  Flask rejected such a cookie outright and treated the browser as signed out; under several replicas, or across a clock step, that hit perfectly good sessions.
+  Only the lower bound is relaxed -- a cookie older than the session lifetime still expires as before, and revoking a session is unaffected.
 
 ## [0.2.1] - 2026-10-07
 

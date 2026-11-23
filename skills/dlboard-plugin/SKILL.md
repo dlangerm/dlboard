@@ -5,24 +5,26 @@ description: Write a plugin for a dlboard server (a chart type, a storage backen
 
 # Writing a dlboard plugin
 
-A dlboard server is a Dash app built at startup from a flat list of plugins. A plugin is a module with a
-`plug(app: Dash) -> None` function. dlboard calls each plugin's `plug`, in list order, once for every app it builds. There
-is no base class and no registry: a module is installed by being in the list, and only then.
+A dlboard server is a Dash app built at startup from a flat list of plugins.
+A plugin is a module with a `plug(app: Dash) -> None` function.
+dlboard calls each plugin's `plug`, in list order, once for every app it builds.
+There is no base class and no registry: a module is installed by being in the list, and only then.
 
 ## 1. Work against the installed version
 
-dlboard is `0.x`, and its Python plugin API may change in any minor release. Find the version the deployment
-installs, and where its source is:
+dlboard is `0.x`, and its Python plugin API may change in any minor release.
+Find the version the deployment installs, and where its source is:
 
 ```bash
 python -c "import importlib.metadata as m; print(m.version('dlboard'))"
 python -c "import dlboard.plugins, pathlib; print(pathlib.Path(dlboard.plugins.__file__).parent)"
 ```
 
-- The built-in plugins in that directory are the reference for this version. Read the one nearest your kind (table
-  below) before you write anything, and copy its shape.
-- The docs for this version are at `https://github.com/dlangerm/dlboard/tree/v<version>/docs`. Start at
-  `plugins/overview.md`, then the page for your kind. The published site follows `main`, which may be ahead.
+- The built-in plugins in that directory are the reference for this version.
+  Read the one nearest your kind (table below) before you write anything, and copy its shape.
+- The docs for this version are at `https://github.com/dlangerm/dlboard/tree/v<version>/docs`.
+  Start at `plugins/overview.md`, then the page for your kind.
+  The published site follows `main`, which may be ahead.
 - Pin `dlboard==<version>` in the deployment's requirements, so an upgrade is a change someone reviews the plugin for.
 
 ## 2. Pick the kind
@@ -40,8 +42,10 @@ python -c "import dlboard.plugins, pathlib; print(pathlib.Path(dlboard.plugins._
 
 ## 3. Use only the public API
 
-A plugin may use what `dlboard.serve`, `dlboard.models` and `dlboard.plugins.data_stores` export (their `__all__`), and
-nothing whose name starts with `_`. The built-ins sometimes import private modules. Copy their structure, not those imports. Besides the table above:
+A plugin may use what `dlboard.serve`, `dlboard.models` and `dlboard.plugins.data_stores` export (their `__all__`), and nothing whose name starts with `_`.
+The built-ins sometimes import private modules.
+Copy their structure, not those imports.
+Besides the table above:
 
 | Function | What for |
 | --- | --- |
@@ -71,33 +75,30 @@ PLUGINS = [*POSTGRES_S3_STORAGE, *PASSWORD_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHAR
 dlboard serve custom --plugins mydeploy.plugins:PLUGINS --workers 4
 ```
 
-To replace a built-in, leave it out of the list and add yours. The bundles in `dlboard.plugins` are `LOCAL_STORAGE`,
-`POSTGRES_STORAGE`, `POSTGRES_S3_STORAGE`, `LOCAL_AUTH`, `PASSWORD_AUTH`, `BUILTIN_BACKEND`, `BUILTIN_CHARTS`,
-`LOCAL_DEPLOYMENT` and `LOCAL_DEPLOYMENT_DEFAULT` (what `dlboard serve local` runs). The pages (home, project,
-experiment, admin, account) are not plugins and cannot be replaced.
+To replace a built-in, leave it out of the list and add yours.
+The bundles in `dlboard.plugins` are `LOCAL_STORAGE`, `POSTGRES_STORAGE`, `POSTGRES_S3_STORAGE`, `LOCAL_AUTH`, `PASSWORD_AUTH`, `BUILTIN_BACKEND`, `BUILTIN_CHARTS`, `LOCAL_DEPLOYMENT` and `LOCAL_DEPLOYMENT_DEFAULT` (what `dlboard serve local` runs).
+The pages (home, project, experiment, admin, account) are not plugins and cannot be replaced.
 
 ## 5. Rules
 
-- **Keep state per app, in an `AppSlot`.** Never in module globals or `app` attributes: one process can build more than
-  one app, and each needs its own.
+- **Keep state per app, in an `AppSlot`.** Never in module globals or `app` attributes: one process can build more than one app, and each needs its own.
 - **Register a chart type with `allow_override=True`,** for the same reason.
-- **A chart type's `name` is saved in every view that uses it.** Never rename it once it is deployed: those charts stop
-  rendering.
-- **No threads or processes for background work.** Register a `Task`. The server's custodian process runs it, and no web
-  worker does.
-- **Never check permissions by hand.** `get_data_store()` only lets the signed-in user do what their roles allow, and
-  `register_setting` says who may read and write your setting. Never use `get_system_data_store` in a request.
-- **Routes a signed-out browser must reach** (a login form, an OIDC callback) go through `add_public_route`. Every other
-  route is behind sign-in.
-- **Browser JS and CSS** stay next to your module and go through `serve_asset` in `plug`. Never use a shared `assets/`
-  folder or Dash's global `hooks`: both leak into every app the process builds.
-- **Your settings** come from environment variables, through a `pydantic_settings.BaseSettings` with a prefix you own
-  (`MYDEPLOY_`, say), read inside `plug`. Secrets go in the environment, never in code.
+- **A chart type's `name` is saved in every view that uses it.** Never rename it once it is deployed: those charts stop rendering.
+- **No threads or processes for background work.** Register a `Task`.
+  The server's custodian process runs it, and no web worker does.
+- **Never check permissions by hand.** `get_data_store()` only lets the signed-in user do what their roles allow, and `register_setting` says who may read and write your setting.
+  Never use `get_system_data_store` in a request.
+- **Routes a signed-out browser must reach** (a login form, an OIDC callback) go through `add_public_route`.
+  Every other route is behind sign-in.
+- **Browser JS and CSS** stay next to your module and go through `serve_asset` in `plug`.
+  Never use a shared `assets/` folder or Dash's global `hooks`: both leak into every app the process builds.
+- **Your settings** come from environment variables, through a `pydantic_settings.BaseSettings` with a prefix you own (`MYDEPLOY_`, say), read inside `plug`.
+  Secrets go in the environment, never in code.
 
 ## 6. Test it
 
-A chart type's methods are class methods, so test them directly. Then build an app from your plugin, which runs every
-`plug` and every startup check, and request a page from it:
+A chart type's methods are class methods, so test them directly.
+Then build an app from your plugin, which runs every `plug` and every startup check, and request a page from it:
 
 ```python
 from pathlib import Path
@@ -127,10 +128,11 @@ def test_the_app_builds_and_serves_with_the_chart(tmp_path: Path, monkeypatch: p
     assert app.server.test_client().get("/").status_code == 200
 ```
 
-Build test apps on `sqlite` alone. `filesystem` and `s3` start an artifact writer process for every app built, which a
-test suite would leak. A storage plugin of your own goes in place of `sqlite`, pointed at a temporary location.
+Build test apps on `sqlite` alone.
+`filesystem` and `s3` start an artifact writer process for every app built, which a test suite would leak.
+A storage plugin of your own goes in place of `sqlite`, pointed at a temporary location.
 
 ## 7. Check it runs
 
-Start the deployment and open the admin page's About tab. It lists every installed plugin by module name, with the first
-line of its module docstring, so give the module one.
+Start the deployment and open the admin page's About tab.
+It lists every installed plugin by module name, with the first line of its module docstring, so give the module one.

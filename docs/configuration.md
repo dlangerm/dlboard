@@ -2,17 +2,15 @@
 
 ## What is this
 
-Every dlboard setting is an environment variable. This page lists all of them, grouped by what they
-configure. A test (`dlboard/tests/configuration_docs_test.py`) fails if a setting exists in the code
-but not here, so this list can't fall behind.
+Every dlboard setting is an environment variable.
+This page lists all of them, grouped by what they configure.
+A test (`dlboard/tests/configuration_docs_test.py`) fails if a setting exists in the code but not here, so this list can't fall behind.
 
-The command line only covers how to *run* the server (`--host`, `--port`, `--workers`, ...; see
-`dlboard serve --help`). Everything about a deployment's behavior is an environment variable, which is
-what a container or process manager passes anyway. `uv run --env-file .env dlboard serve ...` reads a
-file of them; [`.env.example`](../.env.example) is a starting point.
+The command line only covers how to *run* the server (`--host`, `--port`, `--workers`, ...; see `dlboard serve --help`).
+Everything about a deployment's behavior is an environment variable, which is what a container or process manager passes anyway.
+`uv run --env-file .env dlboard serve ...` reads a file of them; [`.env.example`](../.env.example) is a starting point.
 
-Names are part of the [compatibility promise](compatibility.md): they don't change within a major
-version line without a deprecation window.
+Names are part of the [compatibility promise](compatibility.md): they don't change within a major version line without a deprecation window.
 
 ## Server
 
@@ -52,13 +50,12 @@ These tune the process that `dlboard serve` runs under (not used by `--debug`).
 | `DLBOARD_KEEP_ALIVE` | `true` | Keep HTTP/1 connections open between requests. |
 | `DLBOARD_STARTUP_WAIT_S` | `120` | How long to keep retrying a database or object store that cannot be reached yet before the server gives up starting. `0` fails on the first error. A wrong password or a missing bucket always fails at once. See [After a reboot](docker.md#after-a-reboot). |
 
-Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocking-threads`
-(default 16), not environment variables.
+Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocking-threads` (default 16), not environment variables.
 
 ## Background tasks
 
-The server starts one custodian process beside its workers, which runs every background task its plugins register, and
-restarts it if it dies or hangs. Every server sharing a database starts one, and they share the work through the database.
+The server starts one custodian process beside its workers, which runs every background task its plugins register, and restarts it if it dies or hangs.
+Every server sharing a database starts one, and they share the work through the database.
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -75,9 +72,9 @@ restarts it if it dies or hangs. Every server sharing a database starts one, and
 
 ## Retention
 
-The retention plugin deletes a project's oldest runs (to the Trash) once they pass its rule: the newest N runs, or the runs of
-the last N days. A kept run is never deleted by it. These set what a new project starts with, how far an owner may go, and how
-a changed rule takes effect; the rule itself is set per project, on its page.
+The retention plugin deletes a project's oldest runs (to the Trash) once they pass its rule: the newest N runs, or the runs of the last N days.
+A kept run is never deleted by it.
+These set what a new project starts with, how far an owner may go, and how a changed rule takes effect; the rule itself is set per project, on its page.
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -106,10 +103,10 @@ a changed rule takes effect; the rule itself is set per project, on its page.
 
 ## Telemetry
 
-Off unless you set one of these; a deployment that does not never loads the OpenTelemetry SDK. Needs the `otel`
-extra (`pip install 'dlboard[otel]'`; the Docker image has it). The exporters also read the standard
-`OTEL_*` variables (endpoint, headers, service name, resource attributes, export interval). See
-[telemetry.md](telemetry.md) for the metrics and how to point it at Prometheus, Mimir or Loki.
+Off unless you set one of these; a deployment that does not never loads the OpenTelemetry SDK.
+Needs the `otel` extra (`pip install 'dlboard[otel]'`; the Docker image has it).
+The exporters also read the standard `OTEL_*` variables (endpoint, headers, service name, resource attributes, export interval).
+See [telemetry.md](telemetry.md) for the metrics and how to point it at Prometheus, Mimir or Loki.
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -132,7 +129,8 @@ extra (`pip install 'dlboard[otel]'`; the Docker image has it). The exporters al
 
 ## Authentication
 
-Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [auth.md](plugins/auth.md).
+Only matter with an identity-verifying provider such as `PASSWORD_AUTH`.
+See [auth.md](plugins/auth.md).
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -150,7 +148,8 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 ## SQLite storage
 
-`LOCAL_STORAGE`, used by `dlboard serve local`. See [storage.md](plugins/storage.md).
+`LOCAL_STORAGE`, used by `dlboard serve local`.
+See [storage.md](plugins/storage.md).
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -166,7 +165,8 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 ## Postgres storage
 
-`POSTGRES_STORAGE` and `POSTGRES_S3_STORAGE`. See [storage.md](plugins/storage.md).
+`POSTGRES_STORAGE` and `POSTGRES_S3_STORAGE`.
+See [storage.md](plugins/storage.md).
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -196,7 +196,8 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 ## S3 artifact storage
 
-`POSTGRES_S3_STORAGE`; needs the `s3` extra. See [storage.md](plugins/storage.md).
+`POSTGRES_S3_STORAGE`; needs the `s3` extra.
+See [storage.md](plugins/storage.md).
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -218,7 +219,8 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 ## Client (training scripts)
 
-Read by `dlboard.client.run.init`, `DLBoardLogger` and the REST client in the training process. See [client.md](client.md).
+Read by `dlboard.client.run.init`, `DLBoardLogger` and the REST client in the training process.
+See [client.md](client.md).
 
 | Variable | Default | |
 | --- | --- | --- |
@@ -241,20 +243,15 @@ Read by `dlboard.client.run.init`, `DLBoardLogger` and the REST client in the tr
 | `DLBOARD_CONSOLE_MAX_MB` | `10` | The most a run captures; past it, capture stops and the last chunk says so. |
 | `DLBOARD_OFFLINE_DIR` | none | Log every run to this folder instead of a server, to sync later (`dlboard sync`, `dlboard serve local --logdir`). A `file://` server URL does the same for one run. See [client.md](client.md#offline-mode). |
 
-`init` also reads the rank a launcher gives each process, the way Lightning does: the first of `RANK`,
-`LOCAL_RANK`, `SLURM_PROCID` and `JSM_NAMESPACE_RANK` that is set (torchrun, accelerate, SLURM and jsrun set them).
-Only rank 0 logs, and with none of them set a process is rank 0. GPU sampling reads `CUDA_VISIBLE_DEVICES`, as CUDA
-does, to sample only the run's own GPUs.
+`init` also reads the rank a launcher gives each process, the way Lightning does: the first of `RANK`, `LOCAL_RANK`, `SLURM_PROCID` and `JSM_NAMESPACE_RANK` that is set (torchrun, accelerate, SLURM and jsrun set them).
+Only rank 0 logs, and with none of them set a process is rank 0.
+GPU sampling reads `CUDA_VISIBLE_DEVICES`, as CUDA does, to sample only the run's own GPUs.
 
 ## Shutting down
 
-On SIGTERM (a deploy, `docker stop`, `systemctl stop`), each worker stops accepting requests, finishes
-the ones in flight, writes every queued artifact blob and records its reference in the database, then
-exits. All of that has to fit in `DLBOARD_WORKERS_KILL_TIMEOUT_S`; whatever doesn't is abandoned with a
-warning, and the client's retry of that upload recovers it.
+On SIGTERM (a deploy, `docker stop`, `systemctl stop`), each worker stops accepting requests, finishes the ones in flight, writes every queued artifact blob and records its reference in the database, then exits.
+All of that has to fit in `DLBOARD_WORKERS_KILL_TIMEOUT_S`; whatever doesn't is abandoned with a warning, and the client's retry of that upload recovers it.
 
-The orchestrator must wait at least that long before it sends SIGKILL. Docker's default is 10 seconds,
-shorter than the default here, so set `docker stop --time` / `stop_grace_period` (the bundled
-`docker-compose.yml` already does) or Kubernetes' `terminationGracePeriodSeconds` to about 5 seconds
-more than `DLBOARD_WORKERS_KILL_TIMEOUT_S`. A server whose artifact writer has died answers uploads with
-`503` and `Retry-After`, which the client treats as temporary.
+The orchestrator must wait at least that long before it sends SIGKILL.
+Docker's default is 10 seconds, shorter than the default here, so set `docker stop --time` / `stop_grace_period` (the bundled `docker-compose.yml` already does) or Kubernetes' `terminationGracePeriodSeconds` to about 5 seconds more than `DLBOARD_WORKERS_KILL_TIMEOUT_S`.
+A server whose artifact writer has died answers uploads with `503` and `Retry-After`, which the client treats as temporary.

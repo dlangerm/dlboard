@@ -20,5 +20,4 @@ Any other approaches you thought about, and why you didn't prefer them.
 
 ## Additional context
 
-Anything else -- links to how another tool (TensorBoard, W&B, MLflow, ...) handles this, mockups,
-etc.
+Anything else -- links to how another tool (TensorBoard, W&B, MLflow, ...) handles this, mockups, etc.
