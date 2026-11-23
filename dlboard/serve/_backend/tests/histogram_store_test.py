@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 import pendulum
 import pytest
 import sqlalchemy as sa
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
@@ -82,20 +84,39 @@ def test_a_count_beyond_32_bits_is_stored_exactly(store: SQLLiteStore, experimen
     assert entry.counts == [2**40 + 1]
 
 
-@pytest.mark.parametrize(
-    ("total", "kept"),
-    [
-        (10, list(range(10))),
-        (11, [0, 2, 4, 6, 8, 10]),
-        (100, [0, 16, 32, 48, 64, 80, 96, 99]),
-    ],
-)
-def test_a_long_run_is_thinned_by_a_power_of_two_keeping_its_first_and_latest_steps(
-    store: SQLLiteStore, experiment_id: int, total: int, kept: list[int]
-) -> None:
-    _log(store, store.create_run(models.NewRun(experiment_id=experiment_id)), range(total))
+def _thinned(logged: list[int], max_steps: int) -> list[int]:
+    """
+    Every `stride`-th of the `logged` steps from the first, and the latest: about `max_steps`, and at most one more.
 
-    assert _steps(store, experiment_id, max_steps=10) == kept
+    `stride` is the least power of two that takes no more than `max_steps` of them before the latest is added.
+    """
+    stride = 1
+    while len(logged) > max_steps * stride:
+        stride *= 2
+    return sorted({*logged[::stride], logged[-1]})
+
+
+@given(
+    runs=st.lists(st.sets(st.integers(0, 400), min_size=1, max_size=80).map(sorted), min_size=1, max_size=2),
+    max_steps=st.integers(2, 12),
+)
+@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])  # an experiment each
+def test_each_run_is_thinned_by_a_power_of_two_of_its_own_steps_keeping_its_first_and_latest(
+    store: SQLLiteStore, experiment_id: int, runs: list[list[int]], max_steps: int
+) -> None:
+    """However far apart its steps are: a run that logs every 50 steps keeps every 16th of 100, as one logging each."""
+    shared = store.get_experiment(experiment_id)
+    assert shared is not None
+    experiment = store.create_experiment(models.NewExperiment(project_id=shared.project_id)).id
+    logged = [(store.create_run(models.NewRun(experiment_id=experiment)), steps) for steps in runs]
+    for run, steps in logged:
+        _log(store, run, steps)
+
+    histograms = store.fetch_histograms(experiment, keys=_KEY, max_steps=max_steps, run_ids=None)
+
+    assert [[h.step for h in histograms if h.run_id == run.id] for run, _ in logged] == [
+        _thinned(steps, max_steps) for _, steps in logged
+    ]
 
 
 def test_the_steps_kept_stay_put_while_a_run_trains_within_one_stride(
@@ -110,17 +131,6 @@ def test_the_steps_kept_stay_put_while_a_run_trains_within_one_stride(
 
     assert after == [0, 16, 32, 48, 64, 80, 96, 112, 128, 130]
     assert before[:-1] == after[: len(before) - 1]
-
-
-def test_each_run_is_thinned_by_its_own_length(store: SQLLiteStore, experiment_id: int) -> None:
-    long_run, short_run = (store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2))
-    _log(store, long_run, range(100))
-    _log(store, short_run, range(5))
-
-    histograms = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10, run_ids=None)
-
-    assert [h.step for h in histograms if h.run_id == short_run.id] == list(range(5))
-    assert len([h for h in histograms if h.run_id == long_run.id]) == 8
 
 
 def test_a_step_logged_twice_reads_back_as_the_latest_write(store: SQLLiteStore, experiment_id: int) -> None:

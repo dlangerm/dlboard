@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
+import pandas as pd
 import pendulum
 import pytest
 import sqlalchemy as sa
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
@@ -17,8 +20,6 @@ from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
-
-    import pandas as pd
 
     from dlboard.serve._backend._metric_frame import MetricRow
 
@@ -40,55 +41,81 @@ def _log(store: SQLLiteStore, run: models.Run, step: int, **metrics: float | Non
     )
 
 
-def _log_series(
-    store: SQLLiteStore, run: models.Run, values: Sequence[float | None], key: str = "loss"
-) -> None:
-    for step, value in enumerate(values):
-        _log(store, run, step, **{key: value})
-
-
 def _runs(store: SQLLiteStore, experiment_id: int, count: int) -> list[models.Run]:
     return [store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(count)]
 
 
-def test_the_latest_value_is_the_one_at_the_highest_step_however_it_was_logged(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    ahead, behind = _runs(store, experiment_id, 2)
-    _log(store, ahead, 2, loss=0.5)
-    _log(store, ahead, 0, loss=9.0, acc=0.1)  # logged later, but at an earlier step
-    _log(store, ahead, 4, loss=0.25)
-    _log(store, ahead, 4, loss=0.75)  # a re-sent batch: the newest write wins
-    _log(store, behind, 1, loss=0.5, epoch=3.0)
+_Write = tuple[int, int, str, float | None]
+"""One logged value: the run (by index), its step, its key and its value; a step logged again is re-sent."""
+_WRITES = st.lists(
+    st.tuples(
+        st.integers(0, 2),
+        st.integers(0, 4),
+        st.sampled_from(["loss", "acc"]),
+        st.none() | st.just(math.nan) | st.floats(-10, 10, allow_nan=False),
+    ),
+    max_size=14,
+)
+_REDUCTIONS = st.sampled_from(
+    [reduction for reduction in models.MetricReduction if reduction is not models.MetricReduction.HISTORY]
+)
 
-    assert store.fetch_metrics(
-        experiment_id, run_ids=None, reduction=models.MetricReduction.LATEST
-    ).latest_per_run() == {
-        ahead.id: {"loss": 0.75, "acc": 0.1},
-        behind.id: {"loss": 0.5, "epoch": 3.0},
+
+def _reduced(
+    writes: list[_Write], reduction: models.MetricReduction
+) -> dict[tuple[int, str], tuple[int, float]]:
+    """
+    Each run's and key's step and value under `reduction`, worked out from what was written, as it must come back.
+
+    The newest write of a step is its value, and a missing one (`None` or NaN) is no value. The step is the latest
+    with a value, but the first is the first's.
+    """
+    newest = {(run, key, step): value for run, step, key, value in writes}
+    series: dict[tuple[int, str], list[tuple[int, float]]] = {}
+    for (run, key, step), value in sorted(newest.items()):
+        if value is not None and not math.isnan(value):
+            series.setdefault((run, key), []).append((step, value))
+    reduced: dict[tuple[int, str], tuple[int, float]] = {}
+    for name, points in series.items():
+        steps, values = [step for step, _ in points], [value for _, value in points]
+        match reduction:
+            case models.MetricReduction.LATEST:
+                reduced[name] = (steps[-1], values[-1])
+            case models.MetricReduction.FIRST:
+                reduced[name] = (steps[0], values[0])
+            case models.MetricReduction.MIN:
+                reduced[name] = (steps[-1], min(values))
+            case models.MetricReduction.MAX:
+                reduced[name] = (steps[-1], max(values))
+            case models.MetricReduction.MEAN:
+                reduced[name] = (steps[-1], sum(values) / len(values))
+            case models.MetricReduction.HISTORY:
+                raise NotImplementedError
+    return reduced
+
+
+@given(writes=_WRITES, reduction=_REDUCTIONS)
+@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])  # an experiment each
+def test_a_reduction_is_a_row_per_run_and_key_of_what_the_steps_newest_writes_reduce_to(
+    store: SQLLiteStore, experiment_id: int, writes: list[_Write], reduction: models.MetricReduction
+) -> None:
+    """A run or a key with no value is absent; a step logged later at an earlier step is still the earlier."""
+    shared = store.get_experiment(experiment_id)
+    assert shared is not None
+    experiment = store.create_experiment(models.NewExperiment(project_id=shared.project_id)).id
+    runs = _runs(store, experiment, 3)
+    for run, step, key, value in writes:
+        _log(store, runs[run], step, **{key: value})
+
+    frame = store.fetch_metrics(experiment, reduction=reduction, run_ids=None).to_frame()
+
+    got = {
+        (next(at for at, run in enumerate(runs) if run.id == row["run_id"]), key): (row["step"], row[key])
+        for row in frame.to_dict("records")
+        for key in ("loss", "acc")
+        if key in row and not pd.isna(row[key])
     }
-
-
-@pytest.mark.parametrize("missing", [None, math.nan], ids=["null", "nan"])
-def test_a_missing_value_is_no_value_so_the_last_real_one_stands(
-    store: SQLLiteStore, experiment_id: int, missing: float | None
-) -> None:
-    (run,) = _runs(store, experiment_id, 1)
-    _log(store, run, 0, loss=0.5)
-    _log(store, run, 1, loss=missing)
-
-    assert store.fetch_metrics(
-        experiment_id, run_ids=None, reduction=models.MetricReduction.LATEST
-    ).latest_per_run() == {run.id: {"loss": 0.5}}
-
-
-def test_a_key_no_run_has_a_value_for_is_absent(store: SQLLiteStore, experiment_id: int) -> None:
-    (run,) = _runs(store, experiment_id, 1)
-    _log(store, run, 0, diverged=math.nan, loss=1.0)
-
-    assert store.fetch_metrics(
-        experiment_id, run_ids=None, reduction=models.MetricReduction.LATEST
-    ).latest_per_run() == {run.id: {"loss": 1.0}}
+    assert got == pytest.approx(_reduced(writes, reduction))
 
 
 def test_it_leaves_out_other_keys_other_experiments_deleted_and_unasked_runs(
@@ -107,94 +134,6 @@ def test_it_leaves_out_other_keys_other_experiments_deleted_and_unasked_runs(
         run_ids=frozenset({kept.id, deleted.id}),
         reduction=models.MetricReduction.LATEST,
     ).latest_per_run() == {kept.id: {"loss": 1.0}}
-
-
-@pytest.mark.parametrize(
-    ("reduction", "value", "step"),
-    [
-        (models.MetricReduction.LATEST, 2.0, 4),
-        (models.MetricReduction.FIRST, 5.0, 0),
-        (models.MetricReduction.MIN, 1.0, 4),
-        (models.MetricReduction.MAX, 5.0, 4),
-        (models.MetricReduction.MEAN, 3.0, 4),
-    ],
-)
-def test_a_reduction_is_a_row_per_run_and_key_of_the_steps_newest_writes(
-    store: SQLLiteStore, experiment_id: int, reduction: models.MetricReduction, value: float, step: int
-) -> None:
-    run, empty_handed = _runs(store, experiment_id, 2)
-    for at, loss in enumerate([5.0, 3.0, 9.0, 1.0, 2.0]):
-        _log(store, run, at, loss=loss)
-    _log(store, run, 2, loss=4.0)  # step 2 re-sent: only this one counts, so the 9 is no maximum
-    _log(store, empty_handed, 0, other=1.0)
-
-    frame = store.fetch_metrics(experiment_id, keys=frozenset({"loss"}), reduction=reduction, run_ids=None)
-
-    assert (list(frame.run_id), list(frame.step), list(frame.values("loss"))) == ([run.id], [step], [value])
-
-
-def _reduced(series: pd.Series[float], reduction: models.MetricReduction) -> float:
-    match reduction:
-        case models.MetricReduction.LATEST:
-            return float(series.iloc[-1])
-        case models.MetricReduction.FIRST:
-            return float(series.iloc[0])
-        case models.MetricReduction.MIN:
-            return float(series.min())
-        case models.MetricReduction.MAX:
-            return float(series.max())
-        case models.MetricReduction.MEAN:
-            return float(series.mean())
-        case models.MetricReduction.HISTORY:
-            raise NotImplementedError
-
-
-def _from_the_history(
-    store: SQLLiteStore, experiment_id: int, reduction: models.MetricReduction
-) -> dict[tuple[int, str], float]:
-    """What `reduction` of each run's series is, worked out from every step in pandas: what it must agree with."""
-    wide = store.fetch_metrics(experiment_id, run_ids=None).to_frame().sort_values(["run_id", "step"])
-    return {
-        (cast("int", run_id), key): _reduced(series, reduction)
-        for run_id, run in wide.groupby("run_id")
-        for key in (column for column in wide.columns if column not in models.MetricColumn)
-        if len(series := run[key].dropna()) > 0
-    }
-
-
-@pytest.mark.parametrize(
-    "reduction",
-    [
-        models.MetricReduction.LATEST,
-        models.MetricReduction.FIRST,
-        models.MetricReduction.MIN,
-        models.MetricReduction.MAX,
-        models.MetricReduction.MEAN,
-    ],
-)
-def test_a_reduction_is_what_the_whole_history_reduces_to_however_steps_were_re_sent(
-    store: SQLLiteStore, experiment_id: int, reduction: models.MetricReduction
-) -> None:
-    first, second = _runs(store, experiment_id, 2)
-    _log_series(store, first, [5.0, 3.0, 4.0, 1.0, 2.0, 8.0, 6.0, 7.0, 9.0, 0.5], key="loss")
-    _log_series(store, second, [2.0, None, 4.0, math.nan, 6.0], key="loss")
-    _log(store, first, 9, loss=None)  # the newest write of the last step has no value: that step has none
-    _log(store, first, 0, loss=math.nan)  # nor the first
-    _log(store, first, 5, loss=99.0)  # the newest write of a step wins, whatever it was
-    _log(store, second, 4, loss=-3.0)
-    _log(store, second, 4, other=1.0)  # a different key at the same step is no re-send of this one
-
-    reduced = store.fetch_metrics(experiment_id, reduction=reduction, run_ids=None).to_frame()
-
-    got = {
-        (cast("int", run_id), key): float(series.iloc[-1])
-        for run_id, run in reduced.groupby("run_id")
-        for key in ("loss", "other")
-        if len(series := run[key].dropna()) > 0
-    }
-    expected = _from_the_history(store, experiment_id, reduction)
-    assert got.keys() == expected.keys()
-    assert got == pytest.approx(expected)
 
 
 @pytest.mark.parametrize(

@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import pendulum
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
@@ -52,26 +54,22 @@ def test_summarize_metric_keys_says_which_keys_every_run_logged_once(
     ]
 
 
-@pytest.mark.parametrize(
-    ("logged", "max_steps_per_run"),
-    [
-        ([(0, 0), (1, 0)], 1),
-        ([(0, 0), (1, 7)], 1),
-        ([(0, 3), (0, 3)], 1),
-        ([(0, 0), (0, 1)], 2),
-        ([(0, 0), (1, 0), (1, 1)], 2),
-    ],
-    ids=["same step", "different steps", "re-sent step", "two steps in a run", "two steps in a later run"],
-)
-def test_summarize_metric_steps_is_one_step_per_run_only_if_no_run_logged_two_steps(
-    store: SQLLiteStore, experiment_id: int, logged: list[tuple[int, int]], max_steps_per_run: int
+@given(logged=st.lists(st.tuples(st.integers(0, 2), st.integers(0, 9)), max_size=8))
+@settings(max_examples=40, suppress_health_check=[HealthCheck.function_scoped_fixture])  # an experiment each
+def test_summarize_metric_steps_is_the_longest_span_a_run_logged_a_key_over(
+    store: SQLLiteStore, experiment_id: int, logged: list[tuple[int, int]]
 ) -> None:
-    runs = [store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2)]
+    """Exactly 1 when no run logged two steps (re-sending one is no second step), and 0 when none logged it."""
+    shared = store.get_experiment(experiment_id)
+    assert shared is not None
+    experiment = store.create_experiment(models.NewExperiment(project_id=shared.project_id)).id
+    runs = [store.create_run(models.NewRun(experiment_id=experiment)) for _ in range(3)]
     for run, step in logged:
         _log(store, runs[run], step, m=1.0)
+    steps = [[step for at, step in logged if at == run] for run in range(3)]
 
-    assert store.summarize_metric_steps(experiment_id, frozenset({"m"})) == [
-        MetricKeySummary("m", max_steps_per_run)
+    assert store.summarize_metric_steps(experiment, frozenset({"m"})) == [
+        MetricKeySummary("m", max((max(run) - min(run) + 1 for run in steps if run), default=0))
     ]
 
 
