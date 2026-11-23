@@ -71,6 +71,13 @@ repos:
     hooks:
       - id: markdownlint-cli2
 
+  - repo: https://github.com/errata-ai/vale
+      # The Markdown's sentences (see .vale.ini), built by pre-commit with a Go toolchain of its own.
+    rev: v3.26.0
+    hooks:
+      - id: vale
+        types: [markdown]
+
   - repo: https://github.com/jendrikseipp/vulture
     rev: v2.16
     hooks:

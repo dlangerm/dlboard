@@ -13,13 +13,16 @@ uv run pytest -m browser            # run only the browser/e2e tests
 uv run pytest -m "not browser and not postgres and not s3"  # everything that needs neither a browser nor Docker
 uv run ruff check && uv run ruff format   # lint / format
 uv run pyrefly check                      # type check (strict mode)
-uv run prek run --all-files         # run pre-commit hooks manually
+uv run prek run --all-files         # run pre-commit hooks manually (markdownlint and Vale for the Markdown)
 ```
 
 Run `uv run prek install` once after cloning.
 Besides the commit checks it links a `reference-transaction` git hook (`tools/tag_guard.py`) the first time a commit runs them, which refuses to create a `vX.Y.Z` tag that disagrees with `dlboard/_version.py` at the tagged commit -- a pushed release tag is painful to move, so it is caught before one exists.
 It only judges tags you make (`git tag`, `git update-ref`); tags that arrive via `git fetch` or `pull` are never refused.
 Delete tags rather than moving them; `git tag -d` is always allowed.
+
+Markdown is written one sentence per line, so a diff shows the sentence that changed: start each sentence on a new line, and let a long one run as long as it needs.
+The hooks check it: markdownlint the structure (`.markdownlint-cli2.yaml`), Vale the sentences (`.vale.ini`).
 
 See [CLAUDE.md](CLAUDE.md) for the fuller set of architecture notes and code-style conventions this repo follows -- file layout, the plugin system, test placement, and the rest.
 
@@ -38,11 +41,14 @@ See [CLAUDE.md](CLAUDE.md) for the fuller set of architecture notes and code-sty
 People run what `main` builds (`latest`/`beta` are its head's image, and releases are cut from it), so a failed or cancelled run on `main` is an incident.
 CI files "CI failed on main at `<sha>`" when its run fails on a push, and `image-freshness.yml` files "The latest image is behind main" when the head has no image two hours after it landed.
 
-1. **Is it main?** The run's event must be `push` on `main`.
+1. **Is it main?**
+   The run's event must be `push` on `main`.
    A `pull_request` run of an already merged PR is not: it ran after the merge with a read-only cache token (`Cache mode: read` in its log).
    Ignore it.
-2. **Rerun the failed jobs once.** If they pass, link the run and close the issue; if not, it is real.
-3. **Fix forward or revert.** Don't leave the head red while investigating.
+2. **Rerun the failed jobs once.**
+   If they pass, link the run and close the issue; if not, it is real.
+3. **Fix forward or revert.**
+   Don't leave the head red while investigating.
 4. **Confirm `latest` is the head's image:** `docker buildx imagetools inspect` of `ghcr.io/dlangerm/dlboard:latest` and of `:sha-$(git rev-parse --short=7 origin/main)` print the same `Digest`.
    If not, `gh run rerun` the head's `push` run; only the head publishes, so an old run can't move `latest` backwards.
 

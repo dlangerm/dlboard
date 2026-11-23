@@ -7,12 +7,14 @@ What is guaranteed to keep working is in [compatibility.md](compatibility.md); w
 
 ## Steps
 
-1. **Back up first.** See [backup.md](backup.md).
+1. **Back up first.**
+   See [backup.md](backup.md).
    A backup is the only way back from a version you decide you don't want, or from a migration that fails.
 2. **Read the changelog** for every version between yours and the target.
 3. **Install the new version**: `uv tool upgrade dlboard`, `pip install -U dlboard`, or pull the new image tag.
    Pin an exact version (`dlboard==0.3.0`, an `X.Y.Z` image tag) in production rather than following `latest`.
-4. **Restart the server.** On startup, every store upgrades its database to the newest schema before it takes requests.
+4. **Restart the server.**
+   On startup, every store upgrades its database to the newest schema before it takes requests.
    There is no separate migration command to run.
 5. **Check it came up**: `/readyz` answers 200 once the database is reachable and upgraded.
 6. **Upgrade training environments** (`dlboard-client`) whenever convenient.

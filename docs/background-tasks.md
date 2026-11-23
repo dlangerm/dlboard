@@ -12,17 +12,20 @@ You are deploying more than one server against a database, wondering why a purge
 
 ## How it works
 
-**One custodian per server.** The server's master process (Granian's, or the CLI's under `--debug`) starts the custodian before the workers and stops it after them.
-It restarts a custodian that exits, backing off from a second to a minute, and kills and replaces one that stops sending a heartbeat for `DLBOARD_CUSTODIAN_STALL_S` (30 s), or that has not begun beating `DLBOARD_CUSTODIAN_STARTUP_S` (10 minutes) after it started (building the app runs the migrations): a task that hangs hangs only the custodian, which is replaced clean.
+**One custodian per server.**
+The server's master process (Granian's, or the CLI's under `--debug`) starts the custodian before the workers and stops it after them.
+It restarts a custodian that exits, backing off from a second to a minute, and kills and replaces one that stops sending a heartbeat for `DLBOARD_CUSTODIAN_STALL_S` (30 s), or that has not begun beating `DLBOARD_CUSTODIAN_STARTUP_S` (10 minutes) after it started (building the app runs the migrations): a hung task stalls only the custodian, which is replaced clean.
 The heartbeat is kept by a thread that never touches the database, so a database that is slow, or locked by a busy web worker, is never mistaken for a hung custodian.
 The custodian dies with its master (and exits by itself if its parent goes), so a `kill -9` of the server leaves nothing running, and no worker's death touches it.
 
-**The database holds what is happening.** Every custodian records a heartbeat, and every task its holder, last run and outcome, last error, requested run and progress, in the database all your servers share.
+**The database holds what is happening.**
+Every custodian records a heartbeat, and every task its holder, last run and outcome, last error, requested run and progress, in the database all your servers share.
 The admin page's **Background tasks** tab shows them (each custodian, flagged when it has missed three beats; each task, with its backlog), and `/healthz/custodian` answers 503 when no custodian has beaten in three beats or a task has gone three of its intervals without succeeding.
 Alert on that rather than on `/readyz`: a server without a custodian still serves, and shouldn't be taken out of rotation for it.
 The metrics `dlboard.task.runs`, `dlboard.task.duration` and `dlboard.task.backlog` (see [telemetry.md](telemetry.md#metrics)) say how each task is doing.
 
-**Several servers share the work.** Each server starts its own custodian, and they divide what there is to do through the database:
+**Several servers share the work.**
+Each server starts its own custodian, and they divide what there is to do through the database:
 
 - A task that must run one at a time (`SINGLETON`: scheduling, say) is held under a lease of three heartbeats, renewed every heartbeat, so a custodian that dies loses it within a minute and another takes over.
   A run whose lease was taken over (its custodian stalled past it) is told to stop, `ctx.should_stop()` turning true, so a task that checks it between batches never overlaps the one that took over.
@@ -32,7 +35,8 @@ The metrics `dlboard.task.runs`, `dlboard.task.duration` and `dlboard.task.backl
 - SQLite has one writer whatever the number of custodians: more servers on one SQLite database add no throughput.
   More than one server is a Postgres deployment.
 
-**It keeps out of the way of live traffic.** A batch of work that took `t` is followed, before the next one, by a rest of `t * (1 - d) / d`, where `d` is `DLBOARD_CUSTODIAN_DUTY_CYCLE` (0.25): a task takes at most that share of the database's time, drains as fast as that allows, and slows itself when the database is busy, because every batch then takes longer.
+**It keeps out of the way of live traffic.**
+A batch of work that took `t` is followed, before the next one, by a rest of `t * (1 - d) / d`, where `d` is `DLBOARD_CUSTODIAN_DUTY_CYCLE` (0.25): a task takes at most that share of the database's time, drains as fast as that allows, and slows itself when the database is busy, because every batch then takes longer.
 Nothing follows a run's last batch, so a run ends as soon as its work does.
 A task claims, deletes and writes a batch at a time, never a row at a time, and an idle custodian reads the database every `DLBOARD_CUSTODIAN_POLL_S` and records its heartbeat every `DLBOARD_CUSTODIAN_BEAT_S`: a few statements a minute.
 
@@ -51,7 +55,8 @@ Settings are in [configuration.md](configuration.md#background-tasks).
 
 ## For plugin authors
 
-**A task.** Never start a thread or a process for background work; register a `Task` in `plug()`:
+**A task.**
+Never start a thread or a process for background work; register a `Task` in `plug()`:
 
 ```python
 from dlboard.serve import Task, TaskContext, TaskMode, register_task
@@ -87,10 +92,13 @@ Tests never start a custodian: they call a task's `run_once` with a `TaskContext
 There is no hook that calls a plugin when a run finishes, fails or is lost, and there won't be: a run is finished by a request in a web worker and given up as lost by the custodian, so a callback would be split between processes, slow ingest down, and miss what happened while a process was down.
 A plugin that acts on how runs end (a notice when one fails, a summary once it is done) looks for them instead, in a `SINGLETON` task, as `lost_runs` (`dlboard/plugins/backend/lost_runs.py`) and retention (`dlboard/plugins/retention/`) do:
 
-- **What ended.** A run is `RUNNING` until its client reports `FINISHED` or `FAILED` (a `with` block, Lightning's `finalize`), or `UNKNOWN` (its script exited without saying).
+- **What ended.**
+  A run is `RUNNING` until its client reports `FINISHED` or `FAILED` (a `with` block, Lightning's `finalize`), or `UNKNOWN` (its script exited without saying).
   One that goes quiet for `DLBOARD_LOST_RUN_AFTER_S` (a `kill -9`, a lost node) is marked `UNKNOWN` by `lost_runs`, with `lost_at` set; heard from again, it is `RUNNING` once more, with `lost_at` and `ended_at` cleared.
-- **Where to look.** An experiment's `last_activity_at` moves whenever one of its runs logs, ends or is lost, so a task reads `get_runs` only for the experiments active since it last looked, and keeps when that was in a [setting](#plugin-settings-and-page-sections) of its own.
-- **Not exactly once.** `ended_at` is the client's clock: an offline run synced later, or an import, ends in the past, and a run reported done twice (Lightning's `fit`, then `test`) moves it.
+- **Where to look.**
+  An experiment's `last_activity_at` moves whenever one of its runs logs, ends or is lost, so a task reads `get_runs` only for the experiments active since it last looked, and keeps when that was in a [setting](#plugin-settings-and-page-sections) of its own.
+- **Not exactly once.**
+  `ended_at` is the client's clock: an offline run synced later, or an import, ends in the past, and a run reported done twice (Lightning's `fit`, then `test`) moves it.
   Don't use it as a cursor.
   Keep what was handled instead, and make the work idempotent: one `NewWorkItem` per run and status, `key=f"{run.id}:{run.status}"`, done by a `SHARED` task, queues each once while it waits.
 

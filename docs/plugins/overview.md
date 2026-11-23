@@ -27,14 +27,18 @@ Background work is not a thread a plugin starts either: it registers a `Task`, w
 
 ## How it works
 
-**Writing one.** A plugin module needs a `plug(app: Dash) -> None` function.
+**Writing one.**
+A plugin module needs a `plug(app: Dash) -> None` function.
 What it does inside is entirely up to the category: register a Flask route, set a data store on the app, register a chart type, wire a callback.
 Look at `dlboard/plugins/themes/default.py` for the smallest real example (one `set_theme` call, no state) before tackling a bigger category.
 
-**Registering one.** Add the module to the list passed into `app()` — see `LOCAL_DEPLOYMENT` in `dlboard/plugins/__init__.py` for the reference bundle `dlboard serve local` uses.
+**Registering one.**
+Add the module to the list passed into `app()` — see `LOCAL_DEPLOYMENT` in `dlboard/plugins/__init__.py` for the reference bundle `dlboard serve local` uses.
 There's no other registration step; a plugin not in that list is never loaded.
 
-**Identity, not state.** Once plugged, a plugin is snapshotted as an `InstalledPlugin` (`name` + first docstring line — see `InstalledPlugin.describe` in `dlboard/models/_plugin.py`) for introspection (the admin page's About tab lists installed plugins this way).
+**Identity, not state.**
+Once plugged, a plugin is snapshotted as an `InstalledPlugin` (`name` + first docstring line — see `InstalledPlugin.describe` in `dlboard/models/_plugin.py`) for introspection (the admin page's About tab lists installed plugins this way).
 Deliberately no reference to the plugin module/object itself is kept, so that introspection can't reach back into a plugin's internal state from an arbitrary callback thread.
 
-**Design boundary.** The core app exposes minimal hooks for plugins to use (the `Store` accessors described in [architecture.md](../architecture.md)); any opinionated choice within a plugin's own category — how a chart is styled, which auth scheme resolves a user, where artifacts land on disk — belongs in the plugin, not the core.
+**Design boundary.**
+The core app exposes minimal hooks for plugins to use (the `Store` accessors described in [architecture.md](../architecture.md)); any opinionated choice within a plugin's own category — how a chart is styled, which auth scheme resolves a user, where artifacts land on disk — belongs in the plugin, not the core.

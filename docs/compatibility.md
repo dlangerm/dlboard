@@ -10,9 +10,11 @@ Releases are listed in the [changelog](../CHANGELOG.md).
 
 Breaking any of these needs a migration path and a deprecation window of at least one minor release:
 
-- **The database upgrade path.** Any released version upgrades to any later one, with your data kept.
+- **The database upgrade path.**
+  Any released version upgrades to any later one, with your data kept.
   See [upgrading.md](upgrading.md).
-- **REST API `v1`.** Paths (all under `/api/v1/`), payload fields and status-code meanings.
+- **REST API `v1`.**
+  Paths (all under `/api/v1/`), payload fields and status-code meanings.
   Only additive changes: a new optional field or a new path.
   The client ignores response fields it doesn't know, and the server ignores request fields it doesn't know.
 - **Stored data.**
@@ -28,8 +30,10 @@ Breaking any of these needs a migration path and a deprecation window of at leas
   - The *values* of persisted enums (roles, scopes, audit actions, entity types, experiment sources, run statuses).
   - Artifact refs (`file:///...`, `s3://...`).
   - The API token format, `dlb_<id>_<secret>`.
-- **Configuration.** Environment variable names ([configuration.md](configuration.md)), the CLI commands and flags (`dlboard serve local`, `dlboard serve custom --plugins module:attr`, `dlboard users`), and the plugin bundle names in `dlboard.plugins`.
-- **Telemetry.** The names and attributes of the exported metrics ([telemetry.md](telemetry.md)).
+- **Configuration.**
+  Environment variable names ([configuration.md](configuration.md)), the CLI commands and flags (`dlboard serve local`, `dlboard serve custom --plugins module:attr`, `dlboard users`), and the plugin bundle names in `dlboard.plugins`.
+- **Telemetry.**
+  The names and attributes of the exported metrics ([telemetry.md](telemetry.md)).
   New ones are added freely; one is renamed or dropped only after a release that exports both.
 
 Enum values and chart type names are checked by a test, so removing or renaming one fails the build and points here.

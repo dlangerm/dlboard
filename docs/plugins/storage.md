@@ -74,13 +74,15 @@ It generates every table from its pydantic model and writes every query as a Cor
 A new SQL-backed store only needs to subclass `SQLStoreBase`, pass `super().__init__()` an `sqlalchemy.Engine` (your connection settings and pooling live there), and implement `_insert_ignoring_conflicts` — an `INSERT ... ON CONFLICT DO NOTHING`, which each dialect spells through its own `sqlalchemy.dialects.<name>.insert`.
 See `plugins/data_stores/sqlite.py` for the reference implementation.
 
-**Which databases.** The generic `SQLStoreBase` is tested on SQLite and Postgres, and nothing else.
+**Which databases.**
+The generic `SQLStoreBase` is tested on SQLite and Postgres, and nothing else.
 Another database works in two ways.
 You can override the store's methods for it: a method you override is yours, and dlboard calls it through the `DataStore` interface, so the generic SQL is not used there.
 Or you can write the SQL for your database in your own plugin, which is then your own code to test.
 dlboard does not claim a database beyond the two it runs against, and a plugin that writes SQL outside the `DataStore` interface is responsible for that SQL.
 
-**Timestamps.** `_metric_history` reads each metric's `timestamp_utc` as the driver returns it, for speed, and `MetricFrame.from_rows` accepts only an ISO-8601 string or an aware datetime.
+**Timestamps.**
+`_metric_history` reads each metric's `timestamp_utc` as the driver returns it, for speed, and `MetricFrame.from_rows` accepts only an ISO-8601 string or an aware datetime.
 At startup dlboard reads one stored metric timestamp and fails if the driver returned anything else.
 An empty experiment has nothing to read, so the check passes until something has been logged, and a driver that returns the wrong type is only caught then.
 

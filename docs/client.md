@@ -43,30 +43,36 @@ See `examples/lightning_quickstart.py` for a complete, runnable example (MNIST M
 
 Everything below is the same for both: `logger.log_artifact(...)`, `logger.log_histograms(...)` and the rest are a run's `run.log_artifact(...)`, `run.log_histograms(...)`, ..., and `logger.finalize(...)` is `run.finish(...)`.
 
-**Hyperparameters.** `init(hparams=...)`, `save_hyperparameters()` (or `logger.log_hyperparams(...)`) takes anything nested: pydantic models, pydantic and stdlib dataclasses, a `Namespace`, plain dicts and ordinary init args.
+**Hyperparameters.**
+`init(hparams=...)`, `save_hyperparameters()` (or `logger.log_hyperparams(...)`) takes anything nested: pydantic models, pydantic and stdlib dataclasses, a `Namespace`, plain dicts and ordinary init args.
 They're flattened to `parent/child` keys (`optim/schedule/warmup_steps`), which the experiment page's hyperparameter columns and run compare group on the same `/`.
 Pydantic serializes them, so a model's aliases and field serializers apply; a list is stored as one JSON string, and scalars are stored exactly as given.
 
-**Checkpoints.** `DLBoardLogger(..., log_model="all")` uploads every checkpoint a `ModelCheckpoint` saves, even one `save_top_k` deletes moments later (each is copied before it's queued).
+**Checkpoints.**
+`DLBoardLogger(..., log_model="all")` uploads every checkpoint a `ModelCheckpoint` saves, even one `save_top_k` deletes moments later (each is copied before it's queued).
 `log_model=True` uploads only the ones still kept, when training finishes.
 Each is a `File` (below) of kind `checkpoint`, keyed `checkpoints/<file name>`, tagged with its score and Lightning's `latest`/`best`/`best_k`, and stamped with the global step its callback saved at (with `log_model=True`, the step of that callback's last save).
 Any number of `ModelCheckpoint` callbacks work.
 On the experiment page they are one list, split into `Latest`, `Best` and `Top-k` tabs by those tags, paged and sortable by step and score.
 
-**What produced a run.** A new run records, as it starts, what produced it: the git commit, branch and `origin` remote (credentials taken out of its URL) and whether tracked files had changes, the command line, working directory and interpreter, the Python version, platform and host, every installed distribution's version, and -- when the script already imported torch -- the CUDA version it was built with (and the GPUs' names, once the script has started CUDA itself: dlboard never starts it).
-With `DLBOARD_CONTEXT_DIFF=true` (off by default, since uncommitted changes are where a secret pasted in to try something sits) the changes not yet committed (`git diff HEAD`) are uploaded as the run's `context/git.diff` artifact, unless the diff is over 1 MB. On the experiment page, auto-generate gives it a `run_context` chart in a *Run context* panel (or add one from Suggest charts): a fact a row and a run a column, its sections and "only differences" chosen in its settings, with each run's `git.diff` linked under it.
+**What produced a run.**
+A new run records, as it starts, what produced it: the git commit, branch and `origin` remote (credentials taken out of its URL) and whether tracked files had changes, the command line, working directory and interpreter, the Python version, platform and host, every installed distribution's version, and -- when the script already imported torch -- the CUDA version it was built with (and the GPUs' names, once the script has started CUDA itself: dlboard never starts it).
+With `DLBOARD_CONTEXT_DIFF=true` (off by default, since uncommitted changes are where a secret pasted in to try something sits) the changes not yet committed (`git diff HEAD`) are uploaded as the run's `context/git.diff` artifact, unless the diff is over 1 MB.
+On the experiment page, auto-generate gives it a `run_context` chart in a *Run context* panel (or add one from Suggest charts): a fact a row and a run a column, its sections and "only differences" chosen in its settings, with each run's `git.diff` linked under it.
 The run compare (**Diff**) lists all of it as *Context*, beside the hyperparameters, so "Differences" shows the commit, the command or the package versions two runs did not share.
 Nothing about it fails or holds up a run: what can't be found (no git, a notebook) is left out, and a server older than this answers with a warning.
 Turn parts off with `DLBOARD_CONTEXT_GIT`, `DLBOARD_CONTEXT_COMMAND` (if your arguments carry secrets) and `DLBOARD_CONTEXT_PACKAGES`, or `RunSettings(context=ContextSettings(...))`.
 Environment variables are never recorded.
 A run attached to (`run_id=`) keeps the context it was started with.
 
-**Pinning, keeping and tagging a run.** A script that knows its run matters can say so as it launches it, instead of someone clicking afterwards: `DLBoardLogger(..., pin=PinColor.RED)` pins the run for you in that colour (see [comparisons.md](comparisons.md#pins)), `keep=True` keeps it out of [retention](retention.md)'s reach, and `tags=["baseline", "sweep-3"]` tags it (see [comparisons.md](comparisons.md#tags)).
+**Pinning, keeping and tagging a run.**
+A script that knows its run matters can say so as it launches it, instead of someone clicking afterwards: `DLBoardLogger(..., pin=PinColor.RED)` pins the run for you in that colour (see [comparisons.md](comparisons.md#pins)), `keep=True` keeps it out of [retention](retention.md)'s reach, and `tags=["baseline", "sweep-3"]` tags it (see [comparisons.md](comparisons.md#tags)).
 All three are also arguments of `DLBoardLogger.from_names` and `dlboard.init`.
 Pinning is for anyone who can see the run; keeping and tagging take an editor of its project.
 A server that refuses fails the logger's construction, with its reason in the error, before anything is logged; `BasicDlboardAPI.mark_run(run_id, pin=..., keep=..., tags=...)` does the same to a run that exists.
 
-**Authenticating.** If the server signs people in (see [Auth](plugins/auth.md)), the script has to sign in too:
+**Authenticating.**
+If the server signs people in (see [Auth](plugins/auth.md)), the script has to sign in too:
 
 - Create an API token on your Account page.
 - Set it as `DLBOARD_API_KEY` wherever the script runs, or pass `api_key=` to `BasicDlboardAPI`.
@@ -75,7 +81,8 @@ Before it starts, the logger checks the key with the server's `/api/v1/whoami` a
 Without that check, bad credentials would only show up later, as metrics that were never stored.
 `dlboard serve local` needs no key.
 
-**A job on a cluster: a run token.** A job that runs somewhere else (a SLURM or Kubernetes job, a shared cluster's vault) shouldn't carry your API token, which can do anything you can.
+**A job on a cluster: a run token.**
+A job that runs somewhere else (a SLURM or Kubernetes job, a shared cluster's vault) shouldn't carry your API token, which can do anything you can.
 Mint a *run token* where you submit the job instead, and hand the job that:
 
 ```bash
@@ -101,11 +108,13 @@ env = {**job_env, "DLBOARD_API_KEY": minted.token}  # and minted.run_id, minted.
 
 `run_id=` mints one for a run that exists instead, and `api_key=` asks with a key other than `DLBOARD_API_KEY`.
 
-**Guard your script's entry point.** The two shipping processes are started with `multiprocessing`'s `spawn` method, which re-imports your training script's `__main__` module from scratch in each one.
+**Guard your script's entry point.**
+The two shipping processes are started with `multiprocessing`'s `spawn` method, which re-imports your training script's `__main__` module from scratch in each one.
 A script that builds the logger (or starts training) at module level, with no `if __name__ == "__main__":` guard, re-runs that code in every shipping process too — usually visible as training appearing to restart, or the logger itself being constructed more than once.
 This is the same requirement Python's own `multiprocessing` docs describe for any spawn-based code, not something specific to dlboard.
 
-**System metrics.** Install `dlboard-client[system]` and a run samples the host's CPU and memory and the training process's own, every 30 seconds; add `dlboard-client[gpu]` (NVML, NVIDIA's management library) and it samples each GPU the run can use too (`CUDA_VISIBLE_DEVICES`, as CUDA numbers them: `gpu0` is `cuda:0`): utilization, memory, temperature and power.
+**System metrics.**
+Install `dlboard-client[system]` and a run samples the host's CPU and memory and the training process's own, every 30 seconds; add `dlboard-client[gpu]` (NVML, NVIDIA's management library) and it samples each GPU the run can use too (`CUDA_VISIBLE_DEVICES`, as CUDA numbers them: `gpu0` is `cuda:0`): utilization, memory, temperature and power.
 They are two extras because NVML is missing or unusable on plenty of machines that still have a CPU worth watching: either works without the other, and NVML that can't start only turns the GPU part off.
 Each sample is ordinary metrics under `system/` (`system/cpu.utilization`, `system/hw.gpu.memory.usage/gpu0`, ...
 named after OpenTelemetry's semantic conventions), at a step that is the Unix time it was taken, so a resumed run's samples never land on its earlier ones; auto-generate charts them in a `system` panel against the time they were logged.
@@ -116,7 +125,8 @@ Only rank 0 samples, so a multi-node job covers rank 0's node.
 
 ![Line charts of each run's GPU utilization and process memory against the time they were sampled](images/system-metrics.png)
 
-**Console output.** A run captures what the script prints -- everything written to `sys.stdout` and `sys.stderr`, tracebacks included -- from its start until it is finished, and auto-generate gives it a `console` chart: each run's newest stretch of output with its latest line at the top (or, set to *oldest first*, its first stretch as printed), a pager through the rest (**Oldest**, **Older**, **Newer**, **Newest**, and which chunk is on show), and a filter over the lines on show.
+**Console output.**
+A run captures what the script prints -- everything written to `sys.stdout` and `sys.stderr`, tracebacks included -- from its start until it is finished, and auto-generate gives it a `console` chart: each run's newest stretch of output with its latest line at the top (or, set to *oldest first*, its first stretch as printed), a pager through the rest (**Oldest**, **Older**, **Newer**, **Newest**, and which chunk is on show), and a filter over the lines on show.
 Its run picker lists the runs newest first, as the Runs table does, each in the colour and dash the other charts draw it in, and opens on the newest.
 A line that is a JSON object (structlog's `JSONRenderer`, say) is drawn with its time, level and message pulled out, and its other fields after them; any other line as a terminal shows it, in its colours (ANSI escapes, 16, 256 or 24-bit), and a progress bar that redraws its line (`\r`, as tqdm and Lightning's do) as it was last drawn.
 A line wider than the chart wraps (set *wrap* off and it scrolls sideways), and only the lines in view are in the page, so a chunk of thousands scrolls as quickly as a short one.
@@ -132,7 +142,8 @@ If your logs already go to Loki or the like, bind the run's ids into them instea
 
 ![A console chart: a run's newest output, its JSON lines drawn with their level, with Older and Newer and a filter](images/console-chart.png)
 
-**How a run ends.** A run's `with` block (or `run.finish(...)`) ends it, and Lightning finalizes the logger when a stage finishes: `"success"` records the run as *finished* and `"failed"` as *failed*, with the time it ended (stamped by your machine, like the run's start, so the duration never mixes two clocks).
+**How a run ends.**
+A run's `with` block (or `run.finish(...)`) ends it, and Lightning finalizes the logger when a stage finishes: `"success"` records the run as *finished* and `"failed"` as *failed*, with the time it ended (stamped by your machine, like the run's start, so the duration never mixes two clocks).
 The runs table shows it as "running", "3m 23s", "2d 3h" or "✕ 1h 2m" next to the run.
 A later stage (`trainer.test` after `fit`) moves the end time later.
 A script that exits without Lightning finalizing the logger (an exception outside the trainer, say) is recorded as *unknown* -- ended, but not known how.
@@ -140,12 +151,14 @@ A process that is killed outright (`kill -9`, the OOM killer, a lost node) can't
 Heard from again (a network partition healed, a job resumed), it is running again.
 A server that predates this simply doesn't record any of it.
 
-**Multi-GPU (DDP).** Every rank builds its own logger and Lightning calls all of them, so only global rank 0 logs: a non-zero rank makes no server calls, starts no shipping processes and drops whatever it's asked to log, which means one run per job rather than one per GPU.
+**Multi-GPU (DDP).**
+Every rank builds its own logger and Lightning calls all of them, so only global rank 0 logs: a non-zero rank makes no server calls, starts no shipping processes and drops whatever it's asked to log, which means one run per job rather than one per GPU.
 Call `init` on every rank too: it reads the rank the launcher set (`RANK`, else `LOCAL_RANK`, `SLURM_PROCID` or `JSM_NAMESPACE_RANK`, as Lightning does), and a non-zero rank gets a run that does nothing.
 To log into a run that already exists instead of creating one — resuming it, or sharing it between processes you launch separately — pass `run_id=` or set `DLBOARD_RUN_ID`; the logger checks it exists up front and uses its experiment.
 `logger.run_id` is how you read the id of a run the logger created, to hand on to such a process.
 
-**How much to log.** How often you log decides how fast a chart of it draws.
+**How much to log.**
+How often you log decides how fast a chart of it draws.
 A line chart reads every point logged of its metrics for the runs shown, then thins them to `max_points` (500 by default) per run to draw, so it costs what was logged, not what is drawn: about 5 ms per thousand points on a laptop, which a live update repeats for each open panel.
 The run list, the lists of metrics and artifacts, a bar chart of each run's latest value (its default) and a table with a row per run do not grow with the steps logged; a bar chart that aggregates the steps of each run (`mean`, `sum`, ...) reads every one, as a line chart does.
 A table with a row per step sends every one of its rows to the browser, so past `DLBOARD_MAX_TABLE_ROWS` (5,000) it says how many instead of drawing them: a row per epoch, or per run, stays small.
@@ -160,7 +173,8 @@ For a long run, log less often rather than expecting every step to be cheap:
   To see a family's parts, group the band by the part of the name that tells them apart (`accuracy/#,#/*` by 2 is a band per class).
   Auto-generate makes at most 200 charts at once: the keys past that stay uncharted, and Suggest charts can add them.
 
-**If the server (or your network) is down.** Logging never blocks training, and never fails it: `log_metrics`/ `log_artifact` queue onto a bounded buffer the shipping processes drain in the background, retrying a failure with exponential backoff rather than hammering a server that's still down.
+**If the server (or your network) is down.**
+Logging never blocks training, and never fails it: `log_metrics`/ `log_artifact` queue onto a bounded buffer the shipping processes drain in the background, retrying a failure with exponential backoff rather than hammering a server that's still down.
 If the buffer fills faster than it can drain, the item being logged is dropped (not blocked on), with a rate-limited warning while it keeps happening and a final count at `finalize()`.
 Size the buffers with `RunSettings` (`DLBoardLoggerSettings` for the logger; `metrics_q_size`, `artifact_q_size`, ...) if your logging rate is high enough that this matters; `DLBOARD_CONNECT_TIMEOUT_S`/`DLBOARD_READ_TIMEOUT_S` (defaults 10s/60s) cap how long any one request waits before it's treated as failed, and `finalize()` waits at most 60s for both shipping processes together, however long the server stays down.
 
@@ -172,12 +186,14 @@ A metric that diverged to NaN or infinity is recorded as it is.
 An artifact batch sent again (after it failed partway, or its answer was lost) is recorded once: an artifact's key, step and file name are stored once, and logging the same three again keeps the first.
 A metric batch sent again after its answer was lost is stored twice: a chart reads the newest value of a key at a step, so nothing shows it, but a run that logs a key at a step twice keeps both rows.
 
-**Tracing.** To see where a slow batch spent its time, install `dlboard-client[otel]` and set `DLBOARD_TELEMETRY_TRACES=true` (with the standard `OTEL_EXPORTER_OTLP_ENDPOINT`) in your training environment.
+**Tracing.**
+To see where a slow batch spent its time, install `dlboard-client[otel]` and set `DLBOARD_TELEMETRY_TRACES=true` (with the standard `OTEL_EXPORTER_OTLP_ENDPOINT`) in your training environment.
 Each batch the shipping processes send becomes one trace, and a server with tracing on (see [telemetry](telemetry.md#traces)) continues it through its database and artifact storage.
 It asks little of the rest of your environment: only the standard OpenTelemetry SDK and OTLP exporter, release 1.16 or later with no upper bound, and nothing is patched or made the global tracer in your training process.
 A collector that is down costs spans, never a training step.
 
-**Histograms.** `logger.log_histograms({"grad_norm/layer1": tensor}, step=global_step)` logs the distribution of any array, tensor or list of numbers at a step -- per-layer gradient norms, weights, activations, per-sample losses -- instead of averaging it into one scalar.
+**Histograms.**
+`logger.log_histograms({"grad_norm/layer1": tensor}, step=global_step)` logs the distribution of any array, tensor or list of numbers at a step -- per-layer gradient norms, weights, activations, per-sample losses -- instead of averaging it into one scalar.
 The values are binned **in your training process, at the call**, in one pass, and only the bucket edges and counts are queued and sent: the server never sees (or computes over) the raw values, so a huge tensor or a fine binning slows down only the script that chose it.
 A histogram has at most 1024 buckets (`DLBOARD_MAX_HISTOGRAM_BUCKETS`, set on the server and, for a finer binning, in your training environment too); a binning that needs more raises at the call rather than being rejected later.
 
@@ -194,7 +210,8 @@ Pass a `dlboard.models.Histogram` you already binned (its `edges` and `counts`) 
 Histograms ride the same queue and shipping process as metrics, so the backpressure notes below apply to them too.
 A server older than the version that added histograms ignores them, so upgrade the server first.
 
-**Logging artifacts.** Call `logger.log_artifact([...])` with anything implementing `AnyArtifact` (`dlboard/models/_artifact.py`): a `key`, `tags`, a `step`, and a `to_artifact(local_temp, run_id, experiment_id) -> tuple[NewArtifact, Path | AnyUrl]` method.
+**Logging artifacts.**
+Call `logger.log_artifact([...])` with anything implementing `AnyArtifact` (`dlboard/models/_artifact.py`): a `key`, `tags`, a `step`, and a `to_artifact(local_temp, run_id, experiment_id) -> tuple[NewArtifact, Path | AnyUrl]` method.
 Returning a `Path` (written under `local_temp`) uploads that file; returning an `AnyUrl` instead registers it as a *link* — no bytes move, the server just checks the ref is one its `ArtifactStore` can actually serve (see [Storage](plugins/storage.md)) and records it.
 `tags` are shown as a caption next to the artifact and take strings, numbers or booleans: numbers are formatted the same way everywhere (floats to four significant digits, `0.1410`), so log `tags={"iou": iou}` rather than formatting it yourself.
 They are sent and stored as the numbers they are.
@@ -354,7 +371,8 @@ There are five built-in kinds:
   logger.log_artifact([link.Link(key="checkpoint", ref=AnyUrl("s3://my-bucket/ckpt.pt"), step=global_step)])
   ```
 
-**Adding a new artifact kind.** Note this is a *client-side* protocol, not a `PluginProtocol` plugin — there's no `plug()`, and it's never passed into `app()`.
+**Adding a new artifact kind.**
+Note this is a *client-side* protocol, not a `PluginProtocol` plugin — there's no `plug()`, and it's never passed into `app()`.
 Implement `AnyArtifact` (the four members above) for whatever you're logging — a plot, a model checkpoint, a text blob — and pass instances of it to `log_artifact` the same way.
 The server stores it as an opaque blob plus whatever metadata `to_artifact` put in the `NewArtifact`; if you also want a dedicated way to *render* that kind of artifact, pair it with a [chart plugin](plugins/charts.md) — see `image_series.py` for how the built-in image chart type reads back what `Image.to_artifact` wrote.
 

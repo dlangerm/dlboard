@@ -134,9 +134,11 @@ The names and attributes are covered by the [compatibility promise](compatibilit
 
 A server that never started sends nothing, so its absence is what to alert on, not a value:
 
-- **No worker is reporting.** In Prometheus (or Grafana alerting), `absent_over_time(dlboard_server_workers[5m])`.
+- **No worker is reporting.**
+  In Prometheus (or Grafana alerting), `absent_over_time(dlboard_server_workers[5m])`.
   Workers push every `OTEL_METRIC_EXPORT_INTERVAL`, so keep the window several times longer than it.
-- **It tried to start and could not.** An error-level log at startup, `dlboard could not start`, carries the exception; in Loki, `{service_name="dlboard"} | level="error"`.
+- **It tried to start and could not.**
+  An error-level log at startup, `dlboard could not start`, carries the exception; in Loki, `{service_name="dlboard"} | level="error"`.
   The same failure is a `dlboard.startup` span marked as failed.
   Waiting for the database or the object store shows as `dlboard.startup.wait` spans with a `retry` event per attempt (see `DLBOARD_STARTUP_WAIT_S` in [docker.md](docker.md)).
 
@@ -197,7 +199,8 @@ A training process that has exported over gRPC can fork DataLoader workers: a ch
 The wire format that carries a trace between client and server is the standard `OTEL_PROPAGATORS`, by default W3C `traceparent` (and `baggage`), on both sides.
 A mesh that standardises on `b3` or `xray` sets it there, and the two halves still join.
 
-**What the server instruments.** The server process is dlboard's alone, so it uses OpenTelemetry's own instrumentation, which keeps up with the libraries and conventions better than anything written here.
+**What the server instruments.**
+The server process is dlboard's alone, so it uses OpenTelemetry's own instrumentation, which keeps up with the libraries and conventions better than anything written here.
 Flask (every route, Dash callbacks included) is instrumented per app.
 Everything else installed is found through the standard `opentelemetry_instrumentor` entry points, the mechanism `opentelemetry-instrument` uses: SQLAlchemy, `psycopg` and `botocore` come with `dlboard[otel]`, and **installing `opentelemetry-instrumentation-<library>` is all it takes to also trace a plugin's own storage or auth client**.
 `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=botocore` switches any of them off.
@@ -211,22 +214,26 @@ A database driver's instrumentation (`psycopg`) would trace each of them a secon
 dlboard asks SQLAlchemy's instrumentation to run on SQLAlchemy releases newer than the ones it has been tested with, since it only listens for statements, which don't change between them.
 HTTP attributes use the stable names (`http.request.method`, `http.response.status_code`), the same as the client's, unless you set `OTEL_SEMCONV_STABILITY_OPT_IN` yourself.
 
-**Running under `opentelemetry-instrument` or the Kubernetes Operator.** A platform that sets OpenTelemetry up for you gets one pipeline, not two.
+**Running under `opentelemetry-instrument` or the Kubernetes Operator.**
+A platform that sets OpenTelemetry up for you gets one pipeline, not two.
 If the process already has an SDK tracer provider when dlboard starts, dlboard's own spans (`dlboard.blob.write`, `dlboard.blob.ingest`, `dlboard.artifact.purge`) go through it, with or without `DLBOARD_TELEMETRY_TRACES`, and the libraries the platform already instrumented are left as it set them up.
 Without one, and with `DLBOARD_TELEMETRY_TRACES` on, dlboard's provider becomes the process's global one, so a plugin that calls `trace.get_tracer(...)` reaches it.
 This is the server only: the client never replaces a provider in your training process.
 
-**What the client instruments.** Only dlboard's own requests, written by hand: the client never patches `requests` or installs a global tracer provider in your training process, so your own OpenTelemetry setup (or lack of one) is not touched.
+**What the client instruments.**
+Only dlboard's own requests, written by hand: the client never patches `requests` or installs a global tracer provider in your training process, so your own OpenTelemetry setup (or lack of one) is not touched.
 Its OpenTelemetry packages are the standard `opentelemetry-sdk` and OTLP exporter alone, from release 1.16 on, with no upper bound (and no contrib packages, which pin an exact SDK release), so a training environment's own versions stay as they are.
 The calls the training process makes itself (`whoami`, creating the run, finishing it) are spans too, in traces of their own.
 
-**What is never recorded.** The values bound into a SQL statement (the statement has placeholders), request and response bodies, and the `Authorization` header.
+**What is never recorded.**
+The values bound into a SQL statement (the statement has placeholders), request and response bodies, and the `Authorization` header.
 HTTP headers are not recorded at all unless you ask with `OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST` and the like, and then `Authorization`, `Cookie` and `Set-Cookie` are redacted unless you set `OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SANITIZE_FIELDS` yourself.
 An exception is recorded with its type, message and traceback, never its local variables.
 The message is the library's own, so a database error is recorded as the database wrote it, the same text as in the server's log: Postgres's `DETAIL` line can name a value from the row it rejected (`Key (name)=(...) already exists`).
 The values bound into the statement are not in it.
 
-**It never gets in the way.** Spans are exported in batches in the background, and the queue is bounded: a collector that is down or slow costs spans, never a request, never a training step.
+**It never gets in the way.**
+Spans are exported in batches in the background, and the queue is bounded: a collector that is down or slow costs spans, never a request, never a training step.
 Setup happens the first time something is traced, nothing connects at startup, and a tracing failure is logged once and otherwise ignored.
 A shipping process exports its last spans when it is told to flush, before `finalize()` returns, and a process that is exiting waits at most about ten seconds for a collector that will not let go (a rate-limiting gateway can ask an exporter to back off for a minute).
 

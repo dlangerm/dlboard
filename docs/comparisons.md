@@ -22,7 +22,8 @@ A run can be pinned the moment it exists, whether or not it has logged anything 
 
 ![A comparison of a learning-rate sweep and the baseline experiment, with each run's pins in the sidebar](images/comparison.png)
 
-- **Colours.** A pin is plain or one of nine colours, so a team can keep its own set apart from another's: red for one team's candidates, green for the runs under review.
+- **Colours.**
+  A pin is plain or one of nine colours, so a team can keep its own set apart from another's: red for one team's candidates, green for the runs under review.
   A colour is always shown as a pin in that colour, never by its name.
   You can pin a run in as many colours as you like, once each.
 - **A run's pins are one pin**, filled with all its colours (a wheel of them, if there are several).
@@ -40,11 +41,13 @@ A tag is a label the project shares: `baseline`, `ablation/lr`, `sweep-3`.
 Where a pin says who flagged a run, a tag says what the run is, so it has no owner and no colour.
 Everyone who can see the run sees its tags, and an editor of the project puts them on and takes them off.
 
-- **Tagging.** Select runs, type a tag in the bar's box (it offers the project's tags as you type) and click **Tag**, or **Untag** to take it off them.
+- **Tagging.**
+  Select runs, type a tag in the bar's box (it offers the project's tags as you type) and click **Tag**, or **Untag** to take it off them.
   A script tags its run as it launches it (`dlboard.init(..., tags=["baseline"])`, see [client.md](client.md#how-it-works)).
   A tag is stored in lower case, with its spaces trimmed and runs of them made one, so `"Baseline "` and `baseline` are the same tag.
   It is at most 64 characters long.
-- **Finding runs by tag.** A run's tags follow its name in every run list, and the **Run** column's filter matches them as well as the name: `baseline` keeps the runs tagged that.
+- **Finding runs by tag.**
+  A run's tags follow its name in every run list, and the **Run** column's filter matches them as well as the name: `baseline` keeps the runs tagged that.
   A chart's run picker finds a run by its tag too, and a link to one run shows its tags in the banner above the charts.
 
 ![The run list with each run's tags after its name, one more run selected and being tagged from the bar's box](images/run-tags.png)
@@ -55,20 +58,24 @@ A comparison is a page of charts, like an experiment's, over a list of runs you 
 It belongs to whoever made it, and can be shared with the project.
 A project's comparisons are cards on its page, a page of them at a time with a filter by name, as its experiments are.
 
-- **Start one from an experiment or a project.** On its run list, **Compare** has **New comparison** (from the selected runs) and **Add to** (the comparisons you may add to, the first few).
+- **Start one from an experiment or a project.**
+  On its run list, **Compare** has **New comparison** (from the selected runs) and **Add to** (the comparisons you may add to, the first few).
   A new one starts with the panels and columns of the page it is made on, never its run selection.
   Either takes you to the comparison.
-- **On a comparison you may change, runs are added to it, not to a new one.** There **Compare** reads **Add to this comparison**, and **Compare pins** reads "Add red pins to this comparison".
+- **On a comparison you may change, runs are added to it, not to a new one.**
+  There **Compare** reads **Add to this comparison**, and **Compare pins** reads "Add red pins to this comparison".
   The comparison stays where it is, with its panels and its URL, and its run list is drawn again with the runs added.
   A view is not forked by a change to the runs it shows.
-- **Compare what is pinned.** **Compare pins** lists each colour something is pinned in, with how many runs it holds, and compares every one of them, whoever pinned it.
+- **Compare what is pinned.**
+  **Compare pins** lists each colour something is pinned in, with how many runs it holds, and compares every one of them, whoever pinned it.
   Pin a run in each of two experiments and compare them in two menus.
   Comparing the same runs again from an experiment or project opens the comparison you already made of them, rather than another copy.
 - **Add runs** on the comparison itself, if you may: every run of the project pinned in the colours you pick (it says how many that adds first), or runs searched in one experiment.
   Runs are labelled "experiment / run" in every legend, since two experiments can each have a run called `fluffy-otter`.
 - **Take runs out** (select them, then **Remove**) or add them, if you may: the runs of a *shared* comparison are any editor's to add and take out, so a team can keep one list up to date, and a private comparison's are its owner's.
   Anyone else is not offered the buttons.
-- **Who can change what else.** A comparison's charts and settings stay its owner's: editing them as anyone else saves a copy of your own (which keeps what you had hidden), as editing someone else's saved view does.
+- **Who can change what else.**
+  A comparison's charts and settings stay its owner's: editing them as anyone else saves a copy of your own (which keeps what you had hidden), as editing someone else's saved view does.
 
 A comparison holds at most `DLBOARD_MAX_COMPARISON_RUNS` runs (100 by default), however it was filled: starting or adding to one that would hold more is refused, with how many fit.
 A run that was deleted still counts until it is purged.

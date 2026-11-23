@@ -199,6 +199,8 @@ Wherever possible, fold large blocks or repeated logic into compartmentalized un
 
 Whenever you finish an instruction, make sure to at least run `uv run ruff check` and `uv run ruff format` as well as `uv run pyrefly check` to ensure code quality is maintained before review.
 
+Markdown (the docs, the CHANGELOG, this file) is written one sentence per line, a bold lead sentence included; Vale's `Dlboard.OneSentencePerLine` (`.vale/styles/`) fails a line on which one sentence ends and another starts.
+
 Always rely on pydantic validation instead of performing your own, use `pendulum` instead of `datetime` and use `pydantic_settings` for environment variables.
 
 What a Dash callback receives from the browser is validated where it arrives, never read through a `TypedDict` or a cast `dict`: a payload dlboard's own code sends (a `set_props` drop request, a store's data) is a frozen pydantic model with `extra="forbid"`, and the callback's first line is its `model_validate`.

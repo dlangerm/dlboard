@@ -81,12 +81,16 @@ The pages (home, project, experiment, admin, account) are not plugins and cannot
 
 ## 5. Rules
 
-- **Keep state per app, in an `AppSlot`.** Never in module globals or `app` attributes: one process can build more than one app, and each needs its own.
+- **Keep state per app, in an `AppSlot`.**
+  Never in module globals or `app` attributes: one process can build more than one app, and each needs its own.
 - **Register a chart type with `allow_override=True`,** for the same reason.
-- **A chart type's `name` is saved in every view that uses it.** Never rename it once it is deployed: those charts stop rendering.
-- **No threads or processes for background work.** Register a `Task`.
+- **A chart type's `name` is saved in every view that uses it.**
+  Never rename it once it is deployed: those charts stop rendering.
+- **No threads or processes for background work.**
+  Register a `Task`.
   The server's custodian process runs it, and no web worker does.
-- **Never check permissions by hand.** `get_data_store()` only lets the signed-in user do what their roles allow, and `register_setting` says who may read and write your setting.
+- **Never check permissions by hand.**
+  `get_data_store()` only lets the signed-in user do what their roles allow, and `register_setting` says who may read and write your setting.
   Never use `get_system_data_store` in a request.
 - **Routes a signed-out browser must reach** (a login form, an OIDC callback) go through `add_public_route`.
   Every other route is behind sign-in.

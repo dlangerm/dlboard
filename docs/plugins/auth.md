@@ -25,7 +25,8 @@ Built-in providers:
 
 ## How it works
 
-**Every request goes through one gate.** `install_request_gate` (`dlboard/serve/_backend/_auth.py`) puts a `before_request` hook in front of every route: pages, Dash callbacks, REST, and `/artifact/<id>`.
+**Every request goes through one gate.**
+`install_request_gate` (`dlboard/serve/_backend/_auth.py`) puts a `before_request` hook in front of every route: pages, Dash callbacks, REST, and `/artifact/<id>`.
 In order, it tries:
 
 1. an API token, `Authorization: Bearer dlb_...`.
@@ -39,7 +40,8 @@ Someone it can't resolve is redirected to the provider's `login_url()` if they'r
 Anything else gets a 401.
 Only routes registered with `add_public_route` skip the gate.
 
-**Every store access is authorized.** `get_data_store()`/`get_artifact_store()` return wrappers bound to the request's user (`dlboard/serve/_backend/_authorization.py`), so no page, callback or REST handler can forget to check, and no storage backend has to know about users.
+**Every store access is authorized.**
+`get_data_store()`/`get_artifact_store()` return wrappers bound to the request's user (`dlboard/serve/_backend/_authorization.py`), so no page, callback or REST handler can forget to check, and no storage backend has to know about users.
 Background work with no user behind it uses `get_system_data_store()` explicitly.
 
 Access is per project.
@@ -167,14 +169,19 @@ def plug(app) -> None:
     set_auth_provider(app, ProxyHeaderProvider.get_or_create())
 ```
 
-- **A `Principal` is keyed by `(issuer, subject)`, not by username.** `subject` must be the identity provider's stable id (an OIDC `sub`).
+- **A `Principal` is keyed by `(issuer, subject)`, not by username.**
+  `subject` must be the identity provider's stable id (an OIDC `sub`).
   A user who is renamed keeps their projects, and two identity providers presenting the same username can't take over each other's accounts.
-- **`authenticate()` is called on every request that has no API token and no session.** Return `None` if your provider signs people in through a form or redirect instead.
+- **`authenticate()` is called on every request that has no API token and no session.**
+  Return `None` if your provider signs people in through a form or redirect instead.
   In that case, register those routes with `add_public_route`.
   Once the person proves who they are, call `sign_in(store, principal, get_auth_settings())`, then `start_session(user)`.
   See `password.py`.
-- **Check configuration that needs the data store with `add_startup_check(app, check)`.** Plugin order isn't guaranteed, so the store may not be set yet during your `plug()`.
+- **Check configuration that needs the data store with `add_startup_check(app, check)`.**
+  Plugin order isn't guaranteed, so the store may not be set yet during your `plug()`.
   A registered check runs once every plugin has plugged in, and startup fails if it raises.
-- **Only set `verifies_identity = True` if the provider really proves identity.** It turns on access control, and that's only as strong as the provider's proof.
+- **Only set `verifies_identity = True` if the provider really proves identity.**
+  It turns on access control, and that's only as strong as the provider's proof.
   `trusted_header`-style providers must only be reachable through the proxy.
-- **Only one provider per app.** `set_auth_provider` refuses a second one.
+- **Only one provider per app.**
+  `set_auth_provider` refuses a second one.

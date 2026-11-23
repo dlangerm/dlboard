@@ -1,0 +1,38 @@
+# One sentence per line, so a diff shows the sentence that changed (#743).
+#
+# A script, not the `occurrence` rule in Vale's FAQ: that rule counts per block, and a whole list is one block, so it
+# raises one alert per list, at the first place in the file its match text happens to appear. This one reads each line
+# as it renders -- no list or quote marker, no code span, link target or emphasis -- and flags a line on which a sentence
+# ends (`.`, `!` or `?` and a space) and more follows. Code blocks, tables, headings and HTML are not prose; an ellipsis
+# and `e.g.`, `i.e.`, `etc.` and `vs.` end no sentence.
+extends: script
+message: Only use one sentence per line.
+level: error
+scope: raw
+script: |
+  text := import("text")
+  matches := []
+  fenced := false
+  front := false
+  offset := 0
+  for i, line in text.split(scope, "\n") {
+    stripped := text.trim_space(line)
+    if i == 0 && stripped == "---" {
+      front = true
+    } else if front {
+      front = stripped != "---"
+    } else if text.has_prefix(stripped, "```") || text.has_prefix(stripped, "~~~") {
+      fenced = !fenced
+    } else if !fenced && !text.has_prefix(stripped, "|") && !text.has_prefix(stripped, "#") && !text.has_prefix(stripped, "<") {
+      prose := text.re_replace(`^(>\s?)+`, stripped, "")
+      prose = text.re_replace(`^([*+-]|\d+[.)])\s+`, prose, "")
+      prose = text.re_replace("`[^`]*`", prose, "x")
+      prose = text.re_replace(`\[([^\]]*)\](\([^)]*\)|\[[^\]]*\])`, prose, "$1")
+      prose = text.re_replace(`\*+`, prose, "")
+      prose = text.re_replace(`\.\.\.|\b(e\.g|i\.e|etc|vs)\.`, prose, "")
+      if text.re_match(`[.!?]\s+\S`, prose) {
+        matches = append(matches, {begin: offset, end: offset + len(line)})
+      }
+    }
+    offset += len(line) + 1
+  }

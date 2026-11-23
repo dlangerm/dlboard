@@ -48,7 +48,8 @@ The oldest go first.
 
 Never deleted by retention:
 
-- **A kept run.** Select runs in any run list and click **Keep** in the bar: a lock after a run's name says it is kept.
+- **A kept run.**
+  Select runs in any run list and click **Keep** in the bar: a lock after a run's name says it is kept.
   A kept run is not counted either, so keeping runs never makes retention delete others.
   An editor keeps a run; only an owner (or an admin) releases it (**Release**) or deletes it, and deleting an experiment that holds a kept run is an owner's too.
   A script that knows its run matters (a baseline, a release candidate) keeps it as it launches it: `DLBoardLogger(..., keep=True)`, see [client.md](client.md#how-it-works).
