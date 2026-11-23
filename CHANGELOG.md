@@ -11,6 +11,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-11-23
+
 ### Changed
 
 * **A page of line charts draws faster.**
