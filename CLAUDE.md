@@ -211,7 +211,9 @@ policy over what was logged (which runs to delete, say) builds it on these and t
    `query_plans_test.py` fails a read that can only scan, and `read_scaling_test.py` one that reads more because
    more was logged; add yours to them. A chart that draws a series reads it, and that is allowed to grow with what
    was logged: don't trade a common case for a worst one (thinning a history in the database made a typical line
-   chart slower), and tell people how to log less in `docs/client.md` instead.
+   chart slower), and tell people how to log less in `docs/client.md` instead. The per-step tables' indexes are
+   budgeted: each is written on every logged step, so `per_step_indexes_test.py` pins them, and a PR that changes the
+   set measures ingest before and after.
 
 ### Server-side app (Dash)
 
