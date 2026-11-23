@@ -583,6 +583,7 @@
   "dlboard/plugins/charts/tests/charts_test.py::test_line_chart_shortens_a_long_x_axis_name_to_the_chosen_axis_title_length[36]": 0.017655992996878922,
   "dlboard/plugins/charts/tests/charts_test.py::test_line_chart_syncs_by_value_not_index": 0.018576386995846406,
   "dlboard/plugins/charts/tests/charts_test.py::test_line_chart_tooltip_is_titled_with_the_whole_metric_name": 0.012079943000571802,
+  "dlboard/plugins/charts/tests/charts_test.py::test_line_chart_tooltip_takes_a_runs_nearest_logged_value_and_the_earlier_on_a_tie": 0.01571603600132221,
   "dlboard/plugins/charts/tests/charts_test.py::test_line_chart_x_axis_defaults_to_numeric_scale": 0.016750312002841383,
   "dlboard/plugins/charts/tests/charts_test.py::test_line_chart_x_axis_type_date_converts_timestamps_to_epoch_millis": 0.013733776999288239,
   "dlboard/plugins/charts/tests/charts_test.py::test_line_chart_x_axis_type_is_configurable": 0.021992838999722153,

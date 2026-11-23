@@ -10,6 +10,7 @@ import typing
 from pathlib import Path
 
 import dash_mantine_components as dmc
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field, model_validator
 
@@ -163,23 +164,46 @@ def _nearest_fill_pivot(df: pd.DataFrame, x_axis: str, column: str) -> pd.DataFr
     Filling stops at a run's own first and last logged x: outside that range the run's cells stay
     empty. Otherwise a run that stopped early would show its final value out to the longest run's
     last step, as if it had kept logging it.
+
+    The runs are placed with numpy, once the rows are sorted by run and x, not with a `merge_asof` per run: a chart of
+    a few dozen runs paid more for pandas' calls than for the data, a third of drawing a page of line charts (#744).
     """
-    all_x = pd.DataFrame({x_axis: sorted(df[x_axis].unique())})
-    result = {x_axis: all_x[x_axis]}
     raw = f"{column}{_RAW}"
     values = [column, *([raw] if raw in df.columns else [])]
-    for run_id, run_df in df.groupby("run_id"):
-        run_df = run_df[[x_axis, *values]].sort_values(x_axis)
-        run_df["_source_x"] = run_df[x_axis]
-        filled = pd.merge_asof(all_x, run_df, on=x_axis, direction="nearest")
-        in_range = all_x[x_axis].between(run_df[x_axis].iloc[0], run_df[x_axis].iloc[-1])
-        logged_here = filled["_source_x"] == all_x[x_axis]
-        result[str(run_id)] = filled[column].where(logged_here)
-        result[f"{run_id}__y"] = filled[column].where(in_range)
-        result[f"{run_id}__x"] = filled["_source_x"].where(in_range)
+    ordered = df.sort_values(["run_id", x_axis], kind="stable")
+    all_x = ordered[x_axis].drop_duplicates().sort_values().reset_index(drop=True)
+    every, logged = _axis_positions(all_x), _axis_positions(ordered[x_axis])
+    logged_x = ordered[x_axis].to_numpy()
+    logged_values = {value: ordered[value].to_numpy(dtype=float) for value in values}
+    run_ids, starts = np.unique(ordered["run_id"].to_numpy(), return_index=True)
+    result: dict[str, typing.Any] = {x_axis: all_x}
+    for run_id, run in zip(run_ids, np.split(np.arange(len(ordered)), starts[1:]), strict=True):
+        xs = logged[run]
+        nearest = run[_nearest(xs, every)]
+        in_range: np.ndarray = (every >= xs[0]) & (every <= xs[-1])
+        logged_here: np.ndarray = logged[nearest] == every
+        result[str(run_id)] = np.where(logged_here, logged_values[column][nearest], np.nan)
+        result[f"{run_id}__y"] = np.where(in_range, logged_values[column][nearest], np.nan)
+        result[f"{run_id}__x"] = pd.Series(logged_x[nearest]).where(in_range)
         if raw in values:  # a smoothed run's logged value, named in the tooltip beside its smoothed one
-            result[f"{run_id}{_RAW}__y"] = filled[raw].where(in_range)
+            result[f"{run_id}{_RAW}__y"] = np.where(in_range, logged_values[raw][nearest], np.nan)
     return pd.DataFrame(result)
+
+
+def _axis_positions(x: pd.Series) -> np.ndarray:
+    """Where each x sits on the axis, as numbers to measure distances with: a time as its integer ticks."""
+    return x.to_numpy(dtype="int64" if pd.api.types.is_datetime64_any_dtype(x) else float)
+
+
+def _nearest(xs: np.ndarray, every: np.ndarray) -> np.ndarray:
+    """For each of `every`, the index of the nearest of `xs` (sorted): the earlier of two as near, as `merge_asof`'s."""
+    before = np.searchsorted(xs, every, side="right") - 1
+    after = np.searchsorted(xs, every, side="left")
+    earlier, later = np.clip(before, 0, len(xs) - 1), np.clip(after, 0, len(xs) - 1)
+    later_is_nearer: np.ndarray = (after < len(xs)) & (
+        (before < 0) | (xs[later] - every < every - xs[earlier])
+    )
+    return np.where(later_is_nearer, later, earlier)
 
 
 def _to_epoch_millis(column: pd.Series) -> pd.Series:

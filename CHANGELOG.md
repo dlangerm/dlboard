@@ -11,6 +11,13 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Changed
+
+* **A page of line charts draws faster.**
+  A line chart lined its runs up on a shared x-axis with a pandas merge per run, which cost about a third of a page's drawing time on the server; it does it in numpy now, with the same result.
+  A page of 73 charts over 17 runs took 1.0 s of server time to draw and now takes 0.7 s.
+  (#768)
+
 ## [0.20.0] - 2026-11-22
 
 ### Added

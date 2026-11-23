@@ -241,6 +241,20 @@ def test_line_chart_never_shows_a_run_where_it_did_not_log(column: str, has_valu
     assert {step for step, value in values.items() if not np.isnan(value)} == has_value_at
 
 
+def test_line_chart_tooltip_takes_a_runs_nearest_logged_value_and_the_earlier_on_a_tie() -> None:
+    """Run 2 logs steps 0, 4 and 8: at step 2 it is as near to 0 as to 4, and the tooltip names step 0's value."""
+    df = pd.concat(
+        [_metrics_df(12, n_runs=1), _metrics_df(9, n_runs=2).query("run_id == 2 and step % 4 == 0")]
+    )
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="step", sample=False), df)
+
+    rows: dict[int, dict[str, float]] = {row["step"]: row for row in _props(chart)["data"]}
+    assert [rows[step]["2__x"] for step in range(9)] == [0, 0, 0, 4, 4, 4, 4, 8, 8]
+    run_2 = df.query("run_id == 2")
+    logged = dict(zip(run_2["step"].astype(int), run_2["loss"].astype(float), strict=True))
+    assert all(rows[step]["2__y"] == logged[int(rows[step]["2__x"])] for step in range(9))
+
+
 def test_line_chart_syncs_by_value_not_index() -> None:
     """Charts with the same syncId but different sampling rates must sync by x-value.
 
