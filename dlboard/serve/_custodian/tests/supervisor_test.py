@@ -301,6 +301,16 @@ class _RecordedWaits(threading.Event):
         return False
 
 
+class _Clock:
+    """A clock that only moves when a test says so: a batch takes exactly as long as it is told to, whatever the machine is doing."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 @pytest.mark.parametrize("duty_cycle", [0.25, 0.5, 1.0])
 @pytest.mark.parametrize("checks_between", [True, False], ids=["checks-should-stop", "batches-back-to-back"])
 def test_each_batch_rests_for_the_one_before_it_to_keep_the_task_to_its_share_of_time(
@@ -308,6 +318,7 @@ def test_each_batch_rests_for_the_one_before_it_to_keep_the_task_to_its_share_of
 ) -> None:
     """Once, before the next batch, and never after the last: a run ends with its work, not a rest nothing follows."""
     stop = _RecordedWaits()
+    clock = _Clock()
     ctx = TaskContext(
         cast("Dash", object()),
         _task(lambda _ctx: None),
@@ -316,18 +327,19 @@ def test_each_batch_rests_for_the_one_before_it_to_keep_the_task_to_its_share_of
         stop,
         duty_cycle=duty_cycle,
         claim_for=pendulum.duration(minutes=1),
+        clock=clock,
     )
     for took in (0.01, 0.01, 0.01, 0.2, 0.01):
         if checks_between:
             assert not ctx.should_stop()
         with ctx.batch():
-            time.sleep(took)
+            clock.now += took
     flush()
     # The fourth, 10x the others, is the database under strain: the rest after it is 10x longer again.
     expected = [
         took * (1 - duty_cycle) / duty_cycle for took in (0.01, 0.01, 0.01, 0.2 * 10) if duty_cycle < 1
     ]
-    assert stop.waits == pytest.approx(expected, rel=0.5, abs=0.01)
+    assert stop.waits == pytest.approx(expected)
     rests = [s for s in span_exporter.get_finished_spans() if s.name == "dlboard.custodian.rest"]
     assert len(rests) == len(expected)  # a trace shows each rest, not a gap
 
@@ -336,6 +348,7 @@ def test_a_run_is_told_to_stop_once_it_has_used_its_share_of_the_tasks_timeout(
     store: SQLStoreBase[Any],
 ) -> None:
     """So that a task that checks between batches ends itself, rather than be found hung and its custodian restarted."""
+    clock = _Clock()
     ctx = TaskContext(
         cast("Dash", object()),
         _task(lambda _ctx: None, timeout=pendulum.duration(seconds=0.5)),
@@ -344,7 +357,8 @@ def test_a_run_is_told_to_stop_once_it_has_used_its_share_of_the_tasks_timeout(
         threading.Event(),
         duty_cycle=1.0,
         claim_for=pendulum.duration(minutes=1),
+        clock=clock,
     )
     assert not ctx.should_stop()
-    time.sleep(0.45)  # past 80% of the half second
+    clock.now = 0.45  # past 80% of the half second
     assert ctx.should_stop()

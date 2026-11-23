@@ -122,6 +122,7 @@ class TaskContext:
         *,
         duty_cycle: float,
         claim_for: pendulum.Duration,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.app = app
         self.holder = holder
@@ -130,10 +131,12 @@ class TaskContext:
         self._stop = stop
         self._duty_cycle = duty_cycle
         self._claim_for = claim_for
+        self._clock = clock
+        """What batches and the run's budget are timed by, in seconds. Monotonic, not the wall clock, which a synced machine steps; a test hands it its own."""
         self._batches: deque[float] = deque(maxlen=_PACE_HISTORY)
         self._rest_owed = 0.0
         """How long the last batch asks the task to rest before its next (`batch`)."""
-        self._ends_at = time.monotonic() + task.timeout.total_seconds() * _RUN_BUDGET
+        self._ends_at = clock() + task.timeout.total_seconds() * _RUN_BUDGET
         self.backlog: int | None = None
         """What the task last said it had left to do, for the `dlboard.task.backlog` metric."""
 
@@ -144,7 +147,7 @@ class TaskContext:
         Rests first for what the last batch owes, so a stop asked for while resting is answered before the next batch.
         """
         self._rest()
-        return self._stop.is_set() or time.monotonic() > self._ends_at
+        return self._stop.is_set() or self._clock() > self._ends_at
 
     def _rest(self) -> None:
         """Wait out what the last batch owes, once, as a span of its own: a trace would show only a gap where it was."""
@@ -184,9 +187,9 @@ class TaskContext:
         with its work instead of holding its lease, and whatever it asked for, to rest.
         """
         self._rest()
-        started = time.monotonic()  # not the wall clock, which a synced machine steps
+        started = self._clock()
         yield
-        took = time.monotonic() - started
+        took = self._clock() - started
         rest = took * (1 - self._duty_cycle) / self._duty_cycle
         if len(self._batches) >= _PACE_HISTORY_MIN and took > _SLOW_BATCH * statistics.median(self._batches):
             rest *= _SLOW_BATCH
