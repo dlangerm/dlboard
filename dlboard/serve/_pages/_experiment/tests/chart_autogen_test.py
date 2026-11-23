@@ -6,6 +6,8 @@ import typing
 from collections import Counter
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from dlboard.models import (
     CONSOLE_KEY,
@@ -257,6 +259,40 @@ def test_build_auto_panels_empty_catalog_produces_no_panels() -> None:
     assert autogen.build_auto_panels(ColumnCatalog(), delimiter="/", mode="prefix") == []
 
 
+def _family(size: int) -> list[str]:
+    return [f"layer_{at}/grad" for at in range(size)]
+
+
+def _once_each(*drawn: list[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(key for keys in drawn for key in keys))
+
+
+# Names that share their prefixes, suffixes and digit families, and a family big enough to fold into a band.
+_NAMES = st.text(alphabet="ab1/", min_size=1, max_size=5)
+_FAMILY = st.integers(0, autogen.FOLD_AT_KEYS + 2).map(_family)
+
+
+@given(
+    metrics=st.builds(_once_each, st.lists(_NAMES, max_size=20), _FAMILY),
+    artifacts=st.dictionaries(
+        _NAMES | _NAMES.map("ckpt/{}.ckpt".format), st.sampled_from(["image", "files"])
+    ),
+    histograms=st.lists(_NAMES, unique=True, max_size=4).map(tuple),
+    mode=st.sampled_from(["prefix", "suffix"]),
+)
+def test_auto_generate_charts_every_key_it_was_given_so_nothing_is_left_to_suggest(
+    metrics: tuple[str, ...], artifacts: dict[str, str], histograms: tuple[str, ...], mode: autogen.SplitMode
+) -> None:
+    """A metric in a band, a file in a listed directory and a histogram each count as charted."""
+    catalog = ColumnCatalog(
+        metrics=metrics, artifacts=tuple(artifacts), artifact_chart_types=artifacts, histograms=histograms
+    )
+
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode=mode)
+
+    assert autogen.find_uncharted_keys(panels, catalog) == autogen.UnchartedKeys(metrics=[], artifacts=[])
+
+
 # ---- find_uncharted_keys ----
 
 
@@ -277,12 +313,6 @@ def test_find_uncharted_keys_all_uncharted_when_no_panels() -> None:
     assert autogen.find_uncharted_keys([], catalog) == autogen.UnchartedKeys(
         metrics=["loss"], artifacts=["img"]
     )
-
-
-def test_find_uncharted_keys_nothing_uncharted_when_fully_covered() -> None:
-    panels = [_panel("p", _line("loss"), _image("img"))]
-    catalog = ColumnCatalog(metrics=("loss",), artifact_chart_types={"img": "image"})
-    assert autogen.find_uncharted_keys(panels, catalog) == autogen.UnchartedKeys(metrics=[], artifacts=[])
 
 
 def test_files_in_one_directory_share_one_chart_listing_the_directory() -> None:

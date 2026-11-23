@@ -15,6 +15,8 @@ import dash_mantine_components as dmc
 import pandas as pd
 import pytest
 from dash._utils import to_json
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from dlboard.conftest import OneFrame
@@ -86,30 +88,29 @@ def test_panel_header_controls_shows_sync_and_layout_state() -> None:
 # ---- reorder_panel ----
 
 
-@pytest.mark.parametrize(
-    ("moved", "target", "after", "expected"),
-    [
-        pytest.param("c", "a", False, ["c", "a", "b"], id="before-target"),
-        pytest.param("a", "b", True, ["b", "a", "c"], id="after-target"),
-    ],
-)
-def test_reorder_panel_moves_it_before_or_after_the_target(
-    moved: str, target: str, *, after: bool, expected: list[str]
+def _moved[T](items: list[T], moved: int, target: int, *, after: bool) -> list[T]:
+    """`items` with the one at `moved` put just before or after the one at `target`; as they were if either is not one."""
+    if moved == target or not (0 <= moved < len(items) and 0 <= target < len(items)):
+        return items
+    rest = [item for at, item in enumerate(items) if at != moved]
+    at = rest.index(items[target]) + after
+    return [*rest[:at], items[moved], *rest[at:]]
+
+
+_ORDER = st.lists(st.sampled_from("abcde"), unique=True, min_size=1)
+
+
+@given(names=_ORDER, moved=st.sampled_from("abcdef"), target=st.sampled_from("abcdef"), after=st.booleans())
+def test_reorder_panel_moves_it_before_or_after_the_target_and_nothing_else(
+    names: list[str], moved: str, target: str, *, after: bool
 ) -> None:
-    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
+    """Onto itself, or to or from a panel not on the page (`f`), it changes nothing."""
+    panels = [PanelInstance[Any, Any](name=n) for n in names]
+    at = {name: index for index, name in enumerate(names)}
+
     result = page_model.reorder_panel(panels, moved, target, after=after)
-    assert [p.name for p in result] == expected
 
-
-def test_reorder_panel_same_panel_is_a_noop() -> None:
-    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
-    assert page_model.reorder_panel(panels, "a", "a", after=True) == panels
-
-
-def test_reorder_panel_unknown_panel_is_a_noop() -> None:
-    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
-    assert page_model.reorder_panel(panels, "missing", "a", after=True) == panels
-    assert page_model.reorder_panel(panels, "a", "missing", after=True) == panels
+    assert [p.name for p in result] == _moved(names, at.get(moved, -1), at.get(target, -1), after=after)
 
 
 # ---- panel sync: switch + set_panel_sync + _apply_panel_sync ----
@@ -211,49 +212,21 @@ def _panel_with_charts(*names: str) -> PanelInstance[Any, Any]:
     return PanelInstance[Any, Any](name="p", charts=charts)
 
 
-@pytest.mark.parametrize(
-    ("index", "target", "after", "expected"),
-    [
-        pytest.param(0, 2, False, ["b", "a", "c", "d"], id="before-target"),
-        pytest.param(3, 1, True, ["a", "b", "d", "c"], id="after-target"),
-    ],
+@given(
+    names=_ORDER,
+    index=st.integers(-1, 5),
+    target=st.integers(-1, 5),
+    after=st.booleans(),
+    panel=st.sampled_from(["p", "missing"]),
 )
-def test_reorder_chart_moves_it_before_or_after_the_target(
-    index: int, target: int, *, after: bool, expected: list[str]
+def test_reorder_chart_moves_it_before_or_after_the_target_and_nothing_else(
+    names: list[str], index: int, target: int, *, after: bool, panel: str
 ) -> None:
-    panels = [_panel_with_charts("a", "b", "c", "d")]
-    result = page_model.reorder_chart(panels, "p", index, target, after=after)
-    assert [c.parameters["column"] for c in result[0].charts] == expected
+    """Onto itself, from or to a place past either end, or in a panel not on the page, it changes nothing."""
+    result = page_model.reorder_chart([_panel_with_charts(*names)], panel, index, target, after=after)
 
-
-def test_reorder_chart_same_index_is_a_noop() -> None:
-    panels = [_panel_with_charts("a", "b", "c")]
-    result = page_model.reorder_chart(panels, "p", 1, 1, after=True)
-    assert [c.parameters["column"] for c in result[0].charts] == ["a", "b", "c"]
-
-
-def test_reorder_chart_out_of_bounds_index_is_a_noop() -> None:
-    panels = [_panel_with_charts("a", "b", "c")]
-    assert [
-        c.parameters["column"] for c in page_model.reorder_chart(panels, "p", 5, 0, after=False)[0].charts
-    ] == [
-        "a",
-        "b",
-        "c",
-    ]
-    assert [
-        c.parameters["column"] for c in page_model.reorder_chart(panels, "p", 0, 5, after=False)[0].charts
-    ] == [
-        "a",
-        "b",
-        "c",
-    ]
-
-
-def test_reorder_chart_unknown_panel_is_a_noop() -> None:
-    panels = [_panel_with_charts("a", "b")]
-    result = page_model.reorder_chart(panels, "missing", 0, 1, after=True)
-    assert [c.parameters["column"] for c in result[0].charts] == ["a", "b"]
+    moved = _moved(names, index, target, after=after) if panel == "p" else names
+    assert [c.parameters["column"] for c in result[0].charts] == moved
 
 
 # ---- add_chart_to_panel_by_name ----
