@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 import requests
 from playwright.sync_api import expect
+from structlog.testing import capture_logs
 from werkzeug.serving import make_server
 
 from dlboard import models
@@ -119,8 +120,12 @@ def test_a_project_nobody_shared_is_invisible(page: Page, deployment: _Deploymen
     _sign_in(page, deployment, "bob")
 
     expect(page.get_by_text("alice-only")).to_have_count(0)
-    page.goto(f"{deployment.url}/project/{project.id}")
-    expect(page.get_by_text("doesn't exist, or you don't have access to it")).to_be_visible()
+    with capture_logs() as logged:
+        page.goto(f"{deployment.url}/project/{project.id}")
+        expect(page.get_by_text("doesn't exist, or you don't have access to it")).to_be_visible()
+        page.wait_for_load_state("networkidle")
+    # Nor does any of the page ask for it: a callback refused its project was an error logged on each call.
+    assert [entry["event"] for entry in logged if entry["log_level"] == "error"] == []
 
 
 def test_a_token_made_on_the_account_page_authenticates_a_script(

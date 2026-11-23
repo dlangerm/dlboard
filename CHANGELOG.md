@@ -29,6 +29,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   SQLite keeps a time as text and compares it as text, and a time sent through the REST API as `+03:00` was kept as sent, so it sorted three hours late among the rest (`created_before`, the Trash's retention).
   It is kept in UTC now; times already stored that way stay as they are until they are written again.
   (#746)
+* **A project page you can't see no longer logs an error.**
+  The page that says a project doesn't exist, or that you don't have access to it, still drew the project's pinned runs in the sidebar, which the server refused and logged as an uncaught error, with a traceback, on every visit.
+  (#772)
 
 ## [0.20.1] - 2026-11-23
 

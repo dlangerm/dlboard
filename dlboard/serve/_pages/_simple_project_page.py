@@ -34,6 +34,7 @@ from dlboard.serve._pages._delete_confirm import (
 from dlboard.serve._pages._onboarding import first_experiment_snippet, onboarding_card
 from dlboard.serve._pages._page_header import PageHeaderIds, page_header, register_page_header
 from dlboard.serve._pages._page_sections import ProjectPageTab, project_tabs
+from dlboard.serve._pages._pins._pinned_runs import pinned_runs_shells
 from dlboard.serve._pages._pins._pinned_runs import register as register_pinned_runs
 from dlboard.serve._pages._project_members import register_members_callbacks, render_members_section
 from dlboard.serve._url import relative_path
@@ -105,14 +106,21 @@ def _visible_project(project_id: int) -> Project:
     return project
 
 
-def render_project_page(project_id: int, query: Mapping[str, str]) -> dmc.Container:
-    """The whole project page, rendered in the page's own `layout()` -- no callback round trip -- as its URL's `query` asks."""
+def render_project_page(project_id: int, query: Mapping[str, str]) -> list[Component]:
+    """
+    The whole project page, rendered in the page's own `layout()` -- no callback round trip -- as its URL's `query` asks.
+
+    With the sidebar's stores of pinned runs only when the project is there to show: they draw it on their own, and
+    drawing a project the viewer can't see is refused (#772).
+    """
     store = get_data_store()
     project = store.get_project(project_id)
     if project is None:
-        return dmc.Container(
-            dmc.Text("This project doesn't exist, or you don't have access to it.", c="dimmed"), py="xl"
-        )
+        return [
+            dmc.Container(
+                dmc.Text("This project doesn't exist, or you don't have access to it.", c="dimmed"), py="xl"
+            )
+        ]
     members = render_members_section(project)
     tabs = [
         (
@@ -130,7 +138,7 @@ def render_project_page(project_id: int, query: Mapping[str, str]) -> dmc.Contai
     ]
     keys = [str(key) for key, _label, _drawn in tabs]
     asked = query.get("tab", "")
-    return dmc.Container(
+    page = dmc.Container(
         [
             dmc.Box(
                 page_header(
@@ -175,6 +183,7 @@ def render_project_page(project_id: int, query: Mapping[str, str]) -> dmc.Contai
         size="lg",
         py="xl",
     )
+    return [page, *pinned_runs_shells(project_id)]
 
 
 def register(app: Dash) -> None:

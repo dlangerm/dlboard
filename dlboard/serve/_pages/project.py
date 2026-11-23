@@ -8,7 +8,6 @@ import dash
 from dash import dcc
 
 from dlboard.serve import _constants as constants
-from dlboard.serve._pages._pins._pinned_runs import pinned_runs_shells
 from dlboard.serve._pages._simple_project_page import render_project_page
 
 if TYPE_CHECKING:
@@ -23,9 +22,8 @@ def layout(project_id: str, **query: str) -> list[Component]:
     (`PinFilter`), so the page itself has no use for them; they must not be refused, though.
     """
     return [
-        render_project_page(int(project_id), query),
+        *render_project_page(int(project_id), query),
         dcc.Store(id=constants.STATE_PROJECT_ID, data=int(project_id)),
-        *pinned_runs_shells(int(project_id)),
     ]
 
 
