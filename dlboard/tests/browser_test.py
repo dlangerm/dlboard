@@ -4239,13 +4239,16 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
 
     bar.get_by_role("button", name="Save as default").click()  # now it is the chart's own settings
     expect(bar).to_be_hidden()
+    # The card is drawn again from the save (no bar) before the browser forgets the change, which writes the tab's record
+    # back, its open legend with it: clear the session once it has, or the reload starts with the legend open (#758).
+    page.wait_for_function(
+        "() => Object.keys(sessionStorage).filter((k) => k.startsWith('dl-chart-view:'))"
+        ".every((k) => JSON.parse(sessionStorage.getItem(k)).state === null)"
+    )
     page.evaluate("window.sessionStorage.clear()")
     page.reload()
     layers = legend.get_by_role("button", name="Layers")
-    expect(layers).to_be_visible()
-    # The browser builds the legend again as each layer's files arrive, and a click on the nodes it replaces is lost:
-    # click once it holds both layers (their chips are in it while it is folded).
-    expect(chart.locator(".dl-layer-toggle")).to_have_count(2)
+    expect(layers).to_be_visible()  # the reloaded legend is drawn before it is clicked
     layers.click()  # the session was cleared, so the legend is folded again
     expect(boxes_chip).to_have_attribute("aria-pressed", "false")
     expect(layer.locator("rect")).to_be_hidden()
