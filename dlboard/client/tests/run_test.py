@@ -25,6 +25,8 @@ import pydantic
 import pydantic.dataclasses
 import pytest
 import requests
+from hypothesis import HealthCheck, example, given, settings
+from hypothesis import strategies as st
 
 from dlboard import models
 from dlboard._batching import Failure
@@ -300,16 +302,20 @@ def test_log_histograms_raises_at_the_call_when_the_binning_cannot_fit(
     assert metrics.items == []
 
 
-@pytest.mark.parametrize("keys", [1, 1_000, 1_001, 2_500])
+@given(keys=st.integers(1, 2_500))
+@example(keys=1_000)
+@example(keys=1_001)
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture])  # one run logs every example's call
 def test_a_wide_call_is_queued_as_items_of_bounded_width_that_together_hold_every_key_in_order(
     started: run.Run, shippers: list[FakeShipper], keys: int
 ) -> None:
     """A shipped batch is a fixed number of items, so each must be of bounded width however many keys a step logs."""
     metrics = {f"metric_{i:05}": float(i) for i in range(keys)}
+    before = len(shippers[0].items)
 
     started.log_metrics(metrics, step=7)
 
-    queued: list[models.LoggedMetrics] = shippers[0].items
+    queued: list[models.LoggedMetrics] = shippers[0].items[before:]
     assert [len(item.metrics) for item in queued] == [min(1_000, keys - at) for at in range(0, keys, 1_000)]
     assert {(item.step, item.timestamp_utc) for item in queued} == {(7, queued[0].timestamp_utc)}
     assert {key: value for item in queued for key, value in item.metrics.items()} == metrics
@@ -524,12 +530,41 @@ class _Config(pydantic.BaseModel):
         return f"{lr:.0e}"
 
 
+# Keys without a slash and no empty config: one that has either is flattened in ways nobody chose (#775).
+_SCALARS = st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text(max_size=3)
+_CONFIG_KEYS = st.text(
+    st.characters(exclude_characters="/", exclude_categories=["Cs"]), min_size=1, max_size=3
+)
+
+
+def _nested(inner: st.SearchStrategy[Any]) -> st.SearchStrategy[Any]:
+    return st.dictionaries(_CONFIG_KEYS, _SCALARS | inner, min_size=1, max_size=3)
+
+
+_CONFIGS = st.recursive(
+    st.dictionaries(_CONFIG_KEYS, _SCALARS, min_size=1, max_size=3), _nested, max_leaves=10
+)
+
+
+def _paths(config: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Each scalar of `config` by the path of keys to it."""
+    return {
+        path: value
+        for key, nested in config.items()
+        for path, value in (
+            _paths(nested, f"{prefix}{key}/") if isinstance(nested, dict) else {f"{prefix}{key}": nested}
+        ).items()
+    }
+
+
+@given(_CONFIGS)
+def test_flatten_hparams_names_each_scalar_of_a_nested_config_by_its_path(config: dict[str, Any]) -> None:
+    assert run.flatten_hparams(config) == _paths(config)
+
+
 @pytest.mark.parametrize(
     ("params", "expected"),
     [
-        pytest.param(
-            {"hidden": 128, "name": "a", "n": "128"}, {"hidden": 128, "name": "a", "n": "128"}, id="flat"
-        ),
         pytest.param(
             {"fraction": np.float32(0.5), "n": np.int64(3)}, {"fraction": 0.5, "n": 3}, id="numpy-scalars"
         ),

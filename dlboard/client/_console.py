@@ -87,8 +87,9 @@ def as_last_drawn(text: str) -> str:
     The lines as a terminal leaves them: what is drawn again in place is kept once, as it last looked.
 
     A progress bar drawn again with `\r` a thousand times is its last state, once, and so are rich's lines drawn again
-    by going back up over them (two progress bars, training and validation). Text written after a line is erased or
-    returned to replaces it; one that is only returned to (`\r\n`) keeps what it had.
+    by going back up over them (two progress bars, training and validation). A line erased is blank, as a terminal
+    shows it, even if nothing is drawn on it again (a bar taken away); text written after a line is returned to replaces
+    it, and one that is only returned to (`\r\n`) keeps what it had.
     """
     lines, at, replacing = [""], 0, False
     for part in _DRAWING.split(text):
@@ -97,8 +98,10 @@ def as_last_drawn(text: str) -> str:
             if at == len(lines):
                 lines.append("")
             replacing = True
-        elif part in ("\r", "\x1b[2K"):
+        elif part == "\r":
             replacing = True
+        elif part == "\x1b[2K":  # erased now, as a terminal shows it, even if nothing is drawn there again
+            lines[at], replacing = "", True
         elif up := _UP.fullmatch(part):
             at, replacing = max(0, at - int(up[1] or 1)), True
         elif part:

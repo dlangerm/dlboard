@@ -12,6 +12,8 @@ import sys
 import threading
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 from dlboard.client._console import (
     CAPPED_TAG,
@@ -26,18 +28,49 @@ _REDRAW = "\r\x1b[2K\x1b[1A\x1b[2K"
 """What rich writes before it draws a two-line progress display again: erase the line, go up one, erase that too."""
 
 
+_PLAIN = st.text(st.characters(exclude_characters="\r\x1b", exclude_categories=["Cs"]))
+_LINE = st.text(st.characters(exclude_characters="\r\n\x1b", exclude_categories=["Cs"]))
+_PRINTED = _PLAIN.filter(lambda text: text.endswith("\n") or not text)  # what was printed above, line by line
+
+
+@given(_PLAIN)
+def test_what_is_never_drawn_again_is_kept_as_written(written: str) -> None:
+    assert as_last_drawn(written) == written
+
+
+@given(
+    st.lists(st.sampled_from(["a", "b", "\n", "\r", "\r\n", _REDRAW, "\x1b[1A", "\x1b[2A", "\x1b[32m"])).map(
+        "".join
+    )
+)
+def test_what_a_terminal_shows_is_what_it_would_show_again(written: str) -> None:
+    kept = as_last_drawn(written)
+
+    assert as_last_drawn(kept) == kept
+
+
+@given(_PRINTED, st.lists(_LINE.filter(bool), min_size=1))
+def test_a_line_drawn_again_with_a_return_is_kept_as_it_last_looked(printed: str, frames: list[str]) -> None:
+    """`10%\\r50%\\r100%` is `100%`."""
+    assert as_last_drawn(printed + "\r".join(frames)) == printed + frames[-1]
+
+
+@given(_PRINTED, st.lists(st.tuples(_LINE, _LINE), min_size=1))
+@example(printed="", drawings=[("Epoch 0", "val 50%"), ("Epoch 0 done", "")])  # the bar taken away is blank
+def test_rich_lines_drawn_again_by_going_up_over_them_are_kept_once_as_they_last_looked(
+    printed: str, drawings: list[tuple[str, str]]
+) -> None:
+    """#734: rich's two lines (training and validation) were kept once for every time they were drawn."""
+    written = printed + _REDRAW.join(f"{training}\n{validation}" for training, validation in drawings)
+
+    assert as_last_drawn(written) == printed + "{}\n{}".format(*drawings[-1])
+
+
 @pytest.mark.parametrize(
     ("written", "kept"),
     [
-        ("plain\nlines\n", "plain\nlines\n"),
-        ("10%\r50%\r100%\ndone\n", "100%\ndone\n"),
         ("epoch 1\r\n", "epoch 1\n"),  # a Windows line end is not an update
         ("redrawn\r", "redrawn"),
-        # #734: rich's two lines (training and validation) were kept once for every time they were drawn.
-        (
-            f"Total params: 161\nEpoch 0 10%\nval 0%{_REDRAW}Epoch 0 90%\nval 50%",
-            "Total params: 161\nEpoch 0 90%\nval 50%",
-        ),
         # What is printed while it draws goes above it, as it does in a terminal.
         (f"Epoch 0 10%\nval 0%{_REDRAW}warning!\nEpoch 0 20%\nval 9%\n", "warning!\nEpoch 0 20%\nval 9%\n"),
         ("\x1b[1A\x1b[1Aup past the first line", "up past the first line"),
