@@ -135,7 +135,6 @@ def _grid(rows: list[dict[str, Any]], *, page_size: int) -> dag.AgGrid:
             ),
         ],
         rowData=rows,
-        columnSize="responsiveSizeToFit",
         dashGridOptions={
             "pagination": True,
             "paginationPageSize": page_size,

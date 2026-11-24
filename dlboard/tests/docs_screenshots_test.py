@@ -34,11 +34,12 @@ from dlboard import models
 from dlboard.client._console import ConsoleChunk
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
+from dlboard.client.artifacts.file import File
 from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polyline, Shape
 from dlboard.client.artifacts.plotly import PlotlyFigure
 from dlboard.client.histograms import ExponentialBinning
-from dlboard.conftest import ScreenshotMode
-from dlboard.models import CONSOLE_KEY
+from dlboard.conftest import ScreenshotMode, builtin_chart_types
+from dlboard.models import CONSOLE_KEY, FileKind
 from dlboard.plugins.retention import _section as retention
 from dlboard.serve import get_system_data_store
 from dlboard.serve._constants import NAVBAR_RESIZE_HANDLE_ID, NAVBAR_RUN_LIST_ID
@@ -125,19 +126,38 @@ class DocScreenshot(StrEnum):
     COMPARISON = "comparison"
     RETENTION = "retention"
     PLOTLY_CHART = "plotly-chart"
-    # Last, and in this order: each seeds what it shows as it is staged (console output, system metrics, tags), which the
-    # shots before it must not show.
+    BAR_CHART = "bar-chart"
+    RUN_CONTEXT_CHART = "run-context-chart"
+    # Last, and in this order: each seeds what it shows as it is staged (console output, system metrics, tags, files, a
+    # family of metrics), which the shots before it must not show.
     HPARAM_CHARTS = "hparam-charts"
     GROUPED_LINE_CHART = "grouped-line-chart"
     CONSOLE_CHART = "console-chart"
     SYSTEM_METRICS = "system-metrics"
     RUN_TAGS = "run-tags"
+    FILE_LIST = "file-list"
+    SERIES_BAND = "series-band"
 
     @property
     def path(self) -> Path:
         """Where the committed PNG lives."""
         return IMAGES_DIR / f"{self.value}.png"
 
+
+_CHARTS_SHOWN: dict[DocScreenshot, frozenset[str]] = {
+    DocScreenshot.EXPERIMENT_CHARTS: frozenset({"line"}),
+    DocScreenshot.IMAGE_SERIES: frozenset({"image"}),
+    DocScreenshot.TABLE_CHART: frozenset({"table"}),
+    DocScreenshot.HISTOGRAM_CHART: frozenset({"histogram"}),
+    DocScreenshot.PLOTLY_CHART: frozenset({"plotly"}),
+    DocScreenshot.BAR_CHART: frozenset({"bar"}),
+    DocScreenshot.RUN_CONTEXT_CHART: frozenset({"run_context"}),
+    DocScreenshot.HPARAM_CHARTS: frozenset({"scatter", "parallel_coordinates"}),
+    DocScreenshot.CONSOLE_CHART: frozenset({"console"}),
+    DocScreenshot.FILE_LIST: frozenset({"files"}),
+    DocScreenshot.SERIES_BAND: frozenset({"series_band"}),
+}
+"""The chart types each shot shows, which it is checked to draw (`data-chart-type`): every type has at least one."""
 
 _DIALOG_SHOTS = frozenset({DocScreenshot.RUN_COMPARE, DocScreenshot.IMAGE_VIEWER})
 """The shots of a modal's dialog (`_stage` returns it), photographed within its whole pixels."""
@@ -233,6 +253,37 @@ def _console_output(config: _Sweep) -> list[bytes]:
         '{"event": "checkpoint saved", "level": "info", "path": "checkpoints/last.ckpt"}',
     ]
     return ["\n".join(lines).encode() + b"\n" for lines in (started, training)]
+
+
+_CLASSES = 12
+"""How many classes the sweep's per-class accuracy is logged for: enough to fold into one band (`FOLD_AT_KEYS`)."""
+
+
+def _per_class_accuracy(
+    index: int, config: _Sweep, experiment_id: int, run_id: int
+) -> list[models.LoggedMetrics]:
+    """
+    A sweep run's validation accuracy of each class (`acc/class_0` ...), each class learned at a pace of its own.
+
+    From a generator of the run's own, so they leave every other number in the demo as it was.
+    """
+    rng = np.random.default_rng(200 + index)
+    pace: list[float] = rng.uniform(0.6, 1.4, _CLASSES).tolist()
+    return [
+        models.LoggedMetrics(
+            experiment_id=experiment_id,
+            run_id=run_id,
+            step=step,
+            metrics={
+                f"acc/class_{label}": float(
+                    0.95 - 0.7 * math.exp(-step * config.convergence_rate * pace[label]) + rng.normal(0, 0.01)
+                )
+                for label in range(_CLASSES)
+            },
+            timestamp_utc=_T0.add(hours=index, minutes=step),
+        )
+        for step in range(0, _N_STEPS, 3)
+    ]
 
 
 def _system_samples(index: int, experiment_id: int, run_id: int) -> list[models.LoggedMetrics]:
@@ -818,6 +869,76 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             page.get_by_placeholder("tag").fill("b")
             expect(page.get_by_role("option", name="best")).to_be_visible()
             return run_list
+        case DocScreenshot.BAR_CHART:
+            # Each run's latest validation loss, a group of bars per batch size: the two runs at 64 stand side by side.
+            bars = models.ChartInstance[Any, Any](
+                chart_type="bar",
+                parameters={"column": "loss/val", "x_axis": "batch_size", "height": 300, "width": 560},
+            )
+            _open_view(page, demo, dlboard_app, "Bars", [bars])
+            panel = page.locator(".dl-panel-body")
+            expect(panel.locator(".recharts-bar-rectangle path")).to_have_count(len(_SWEEP))
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
+            return panel
+        case DocScreenshot.RUN_CONTEXT_CHART:
+            context = models.ChartInstance[Any, Any](chart_type="run_context", parameters={})
+            _open_view(page, demo, dlboard_app, "Run context", [context])
+            panel = page.locator(".dl-panel-body", has=page.locator(".ag-root-wrapper"))
+            expect(panel.locator(".ag-center-cols-container .ag-row").first).to_be_visible()
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
+            return panel
+        case DocScreenshot.FILE_LIST:
+            api = BasicDlboardAPI(demo.url)
+            runs = _sweep_runs(dlboard_app, demo)
+            # Each run's checkpoints, as a training loop saves them: one at each evaluation, and its best.
+            for config in _SWEEP:
+                with tempfile.TemporaryDirectory() as scratch:
+                    files: list[File] = []
+                    for step in (20, 40):
+                        path = Path(scratch) / f"epoch_{step}.ckpt"
+                        path.write_bytes(b"\0" * (1 << 10) * (step + 7))
+                        files.append(
+                            File(
+                                key=f"checkpoints/epoch_{step}.ckpt",
+                                path=path,
+                                kind=FileKind.CHECKPOINT,
+                                step=step,
+                            )
+                        )
+                    api.log_artifact_batch(
+                        [
+                            file.to_artifact(Path(scratch), runs[config.name], demo.experiment_id)
+                            for file in files
+                        ]
+                    )
+            _wait_for_artifacts(dlboard_app, demo, "checkpoints/epoch_40.ckpt", len(_SWEEP))
+            listed = models.ChartInstance[Any, Any](
+                chart_type="files", parameters={"key_prefix": "checkpoints/", "width": 640}
+            )
+            _open_view(page, demo, dlboard_app, "Checkpoints", [listed])
+            panel = page.locator(".dl-panel-body", has=page.locator(".ag-root-wrapper"))
+            expect(panel.locator(".ag-center-cols-container .ag-row")).to_have_count(2 * len(_SWEEP))
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
+            return panel
+        case DocScreenshot.SERIES_BAND:
+            api = BasicDlboardAPI(demo.url)
+            runs = _sweep_runs(dlboard_app, demo)
+            api.log_metric_batch(
+                [
+                    sample
+                    for index, config in enumerate(_SWEEP)
+                    for sample in _per_class_accuracy(index, config, demo.experiment_id, runs[config.name])
+                ]
+            )
+            band = models.ChartInstance[Any, Any](
+                chart_type="series_band",
+                parameters={"metrics": ["acc/class_#"], "runs": 2, "height": 300, "width": 640},
+            )
+            _open_view(page, demo, dlboard_app, "Per class", [band])
+            panel = page.locator(".dl-panel-body", has=page.locator(".js-plotly-plot"))
+            expect(panel.locator(".scatterlayer .trace")).not_to_have_count(0)
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
+            return panel
         case DocScreenshot.COMPARISON:
             page.goto(f"{demo.url}/comparison/{demo.comparison_id}")
             # Every run of the sweep and the baseline, in one chart: five lines, named for their experiments.
@@ -921,6 +1042,10 @@ def test_doc_screenshot(  # noqa: PLR0913 -- one fixture per thing the render ne
         f"(() => {{ const frozen = {int(_NOW.timestamp() * 1000)}; Date.now = () => frozen; }})()"
     )
     target = _stage(shot, page, demo, dlboard_app)
+    shown: list[str] = target.locator("[data-chart-type]").evaluate_all(
+        "els => els.map((el) => el.dataset.chartType)"
+    )
+    assert _CHARTS_SHOWN.get(shot, frozenset()) <= set(shown)
     page.evaluate("document.fonts.ready")  # a late-swapping web font would otherwise reflow mid-capture
     # Checked, a dialog is photographed at the size it was committed at, so a dialog drawn a little wider still matches.
     committed: tuple[int, int] | None = None
@@ -943,6 +1068,13 @@ def test_doc_screenshot(  # noqa: PLR0913 -- one fixture per thing the render ne
                 f"{shot.path.relative_to(REPO_ROOT)} is stale or missing. Re-run with --screenshots=update and "
                 f"commit (CI also uploads the fresh render, screenshot-diffs/actual/, as the `doc-screenshots` artifact)."
             )
+
+
+def test_every_chart_type_has_a_screenshot() -> None:
+    """A chart plugin without one could be drawn wrong, or not at all, and nothing would see it (each shot checks it drew them)."""
+    shown = {chart_type for types in _CHARTS_SHOWN.values() for chart_type in types}
+
+    assert {chart_type.name for chart_type in builtin_chart_types()} - shown == set()
 
 
 def test_doc_images_are_referenced_and_accounted_for() -> None:

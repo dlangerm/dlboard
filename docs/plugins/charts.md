@@ -136,6 +136,22 @@ A histogram chart's heatmap, one row per run (here the gradient norms of a layer
 
 ![A histogram chart](../images/histogram-chart.png)
 
+A bar chart of each run's latest validation loss, a group of bars for each batch size (the two runs at 64 side by side):
+
+![A bar chart of validation loss grouped by batch size, a bar per run in its color](../images/bar-chart.png)
+
+What produced each run, a fact a row and a run a column:
+
+![A run context chart listing each run's commit, command, machine and packages](../images/run-context-chart.png)
+
+The files a run logged under a prefix, each with its run and step:
+
+![A file list of each run's checkpoints](../images/file-list.png)
+
+A band over a family of metrics (every class's accuracy), its median and spread for each run:
+
+![A series band of each run's per-class accuracy over the steps](../images/series-band.png)
+
 ## When you'd need this
 
 You want a new way to visualize logged metrics/artifacts that the built-in line/bar/table/image/histogram charts don't cover — a scatter plot, a confusion matrix, anything with its own parameter shape and rendering.

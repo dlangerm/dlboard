@@ -352,7 +352,11 @@ def render_chart_item(
         className="dl-chart-item",
         **cast(
             "dict[str, Any]",
-            {"data-chart-id": chart.id, **({"data-dl-view-key": chart.id} if keeps_view else {})},
+            {
+                "data-chart-id": chart.id,
+                "data-chart-type": chart.chart_type,  # what the docs screenshots check they show, of each type
+                **({"data-dl-view-key": chart.id} if keeps_view else {}),
+            },
         ),
     )
 
