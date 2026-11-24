@@ -32,7 +32,7 @@ from pydantic import (
     computed_field,
 )
 
-from dlboard.models import NO_DATA_COLUMNS
+from dlboard.models import NO_DATA_COLUMNS, RenderContext
 from dlboard.serve._pages._experiment._page_model import group_panels_by_tab
 from dlboard.serve._url import UrlState
 
@@ -145,6 +145,12 @@ class Paging(UrlState, frozen=True, extra="ignore", populate_by_name=True):
     a comparison that is not the viewer's.
     """
 
+    runs_drawn: int = Field(default=1, ge=1, exclude=True)
+    """
+    How many runs the page draws, which a chart drawing a plot per run (a histogram's heatmaps) counts against the
+    panel's charts per page. Never in a link nor sent to the browser: each request sets it afresh (`drawing`).
+    """
+
     @classmethod
     def from_request(cls, query: Mapping[str, str], sizes_cookie: str | None) -> Paging:
         """Parse a page request; a malformed link just shows the first page rather than breaking the page."""
@@ -210,6 +216,10 @@ class Paging(UrlState, frozen=True, extra="ignore", populate_by_name=True):
             }
         )
 
+    def drawing(self, runs: int) -> Paging:
+        """A copy for a page that draws `runs` runs (at least one counts), which decides how many of a panel's charts fit a page."""
+        return self.model_copy(update={"runs_drawn": max(runs, 1)})
+
     def with_focus(self, run_id: int | None) -> Paging:
         """A copy drawing just the run `run_id`, or the view's own runs for `None`."""
         return self.model_copy(update={"focus": run_id})
@@ -267,6 +277,25 @@ def page_slice[T](items: Sequence[T], number: int, per_page: int) -> Slice[T]:
     number = min(max(number, 1), total)
     start = (number - 1) * per_page
     return Slice(list(items[start : start + per_page]), number, total)
+
+
+def weighted_page_slice[T](items: Sequence[T], weights: Sequence[int], number: int, budget: int) -> Slice[T]:
+    """
+    `items`' page `number` (clamped into range) when each counts as its weight against a page's `budget`.
+
+    Pages are filled in order, each with as many items as fit, and an item heavier than a whole page is a page of its own.
+    With every weight 1 it is `page_slice`.
+    """
+    pages: list[list[T]] = [[]]
+    used = 0
+    for item, weight in zip(items, weights, strict=True):
+        if pages[-1] and used + weight > budget:
+            pages.append([])
+            used = 0
+        pages[-1].append(item)
+        used += weight
+    number = min(max(number, 1), len(pages))
+    return Slice(pages[number - 1], number, len(pages))
 
 
 def chart_search_keys(chart: models.ChartInstance[Any, Any]) -> set[str]:
@@ -357,7 +386,10 @@ def visible_chart_indexes(panel: models.PanelInstance[Any, Any], paging: Paging)
     """
     chart_paging = paging.chart_paging(panel.name)
     matching = [i for i, chart in enumerate(panel.charts) if chart_matches(chart, chart_paging.q)]
-    return page_slice(matching, chart_paging.page, paging.sizes.charts)
+    # A chart drawing a plot per run (a histogram's heatmaps) counts each against the page, so no page draws more plots.
+    context = RenderContext(columns=panel.grid_columns, page_size=paging.sizes.charts)
+    weights = [panel.charts[i].plots(paging.runs_drawn, context) for i in matching]
+    return weighted_page_slice(matching, weights, chart_paging.page, paging.sizes.charts)
 
 
 def reveal(

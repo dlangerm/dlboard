@@ -255,6 +255,15 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         return cls.natural_width(parameters)
 
     @classmethod
+    def plots(cls, parameters: _Parameters, runs: int, context: RenderContext) -> int:  # noqa: ARG003
+        """
+        How many plots this chart draws for a page of `runs` runs, each counted against the panel's charts per page.
+
+        One for most: a chart of every run in one figure. A chart that draws a plot per run says how many it would.
+        """
+        return 1
+
+    @classmethod
     def register(cls, *, allow_override: bool = False) -> None:
         ChartTypeRegistry.register(cls, allow_override=allow_override)
 
@@ -554,6 +563,11 @@ class ChartTypeRegistry:
         return chart_type.natural_width_in(parameters, context)
 
     @classmethod
+    def plots(cls, chart: ChartInstance[_Dataframe, _Chart], runs: int, context: RenderContext) -> int:
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.plots(parameters, runs, context)
+
+    @classmethod
     def keeps_viewer_state(cls, chart: ChartInstance[_Dataframe, _Chart]) -> bool:
         """Whether a viewer can change `chart` without editing it (see `ChartType.viewer_state_type`)."""
         try:
@@ -674,6 +688,13 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
                 chart_type=self.chart_type,
             )
             return _FALLBACK_NATURAL_WIDTH
+
+    def plots(self, runs: int, context: RenderContext = DEFAULT_RENDER_CONTEXT) -> int:
+        """How many plots this chart draws for `runs` runs (`ChartType.plots`); a broken chart draws its one error."""
+        try:
+            return ChartTypeRegistry.plots(self, runs, context)
+        except (ValidationError, UnknownChartTypeError):
+            return 1
 
 
 class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):

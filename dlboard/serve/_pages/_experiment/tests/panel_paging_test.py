@@ -7,15 +7,17 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 
 from dlboard.conftest import find_props as _find_props
+from dlboard.models import NewRun
 from dlboard.models._view import ChartInstance, PanelInstance
+from dlboard.plugins.charts.histogram import HistogramChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
-from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
-from dlboard.serve._pages._experiment._paging import ChartPaging, PageSizes, Paging, visible_open_panels
+from dlboard.serve._pages._experiment._page_edits import render_panel_area
+from dlboard.serve._pages._experiment._paging import ChartPaging, PageSizes, Paging
 
 if TYPE_CHECKING:
     from dash import html
@@ -23,6 +25,7 @@ if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 LineChart.register(allow_override=True)
+HistogramChart.register(allow_override=True)
 
 FIVE_PER_PAGE = Paging(sizes=PageSizes(panels=5))
 
@@ -39,13 +42,11 @@ def _render(  # noqa: PLR0913
 ) -> html.Div:
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": panels}))
-    loaded = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
-    resolved = panel_view.resolved_paging(
-        loaded, paging.viewing(tab=active_tab, open_panels=open_panels or []), focus_chart=focus_chart
-    )
-    shown = visible_open_panels(loaded.panels, resolved.shown_tab(loaded.panels), resolved)
-    return panel_view.accordion_view(
-        panel_data.panel_frames(store, loaded, resolved, shown), loaded, resolved
+    return render_panel_area(
+        store,
+        repo.load_page(store, repo.ExperimentRef(experiment_id, None)),
+        paging.viewing(tab=active_tab, open_panels=open_panels or []),
+        focus_chart=focus_chart,
     )
 
 
@@ -244,3 +245,19 @@ def test_a_panels_chart_filter_is_only_offered_when_there_are_charts_to_page_or_
     container = _render(store, experiment_id, panels, Paging().with_charts("p", ChartPaging(q=query)))
 
     assert (_panel_header_filter(container, "p") is not None) is offered
+
+
+@pytest.mark.parametrize(("runs", "per_page"), [(0, 6), (1, 6), (2, 3), (3, 2), (4, 1), (9, 1)])
+def test_a_chart_drawing_a_plot_per_run_counts_each_against_the_charts_per_page(
+    store: SQLLiteStore, experiment_id: int, runs: int, per_page: int
+) -> None:
+    for _ in range(runs):
+        store.create_run(NewRun(experiment_id=experiment_id))
+    histograms = [
+        ChartInstance[Any, Any](chart_type="histogram", parameters={"key": f"h{i}"}) for i in range(8)
+    ]
+    panels = [PanelInstance[Any, Any](name="p", charts=histograms)]
+
+    container = _render(store, experiment_id, panels, SIX_CHARTS, open_panels=["p"])
+
+    assert _chart_indexes_shown(container, "p", 8) == list(range(per_page))

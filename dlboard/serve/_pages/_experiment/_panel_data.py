@@ -346,6 +346,17 @@ type PanelFrames = Mapping[str, ChartFrames]
 """The data of the charts `Paging` shows in each open panel, by panel name; a panel with no chart showing has none."""
 
 
+def drawn_paging(store: DataStore[...], page: BasicExperimentPage, paging: Paging) -> Paging:
+    """
+    `paging` with how many runs `page` draws now (`Paging.drawing`).
+
+    A chart drawing a plot per run counts each against its panel's charts per page, so every request sets this before it
+    pages a panel's charts.
+    """
+    scope = page_scope(store, page, paging.hidden, paging.focus)
+    return paging.drawing(sum(len(runs) for runs in scope.values()))
+
+
 def panel_frames(
     store: DataStore[...], page: BasicExperimentPage, paging: Paging, names: Iterable[str]
 ) -> PanelFrames:

@@ -561,6 +561,12 @@ class HistogramChart(ChartType[HistogramChartSettings, pd.DataFrame, dmc.Stack],
 
     @classmethod
     @typing.override
+    def plots(cls, parameters: HistogramChartSettings, runs: int, context: RenderContext) -> int:
+        """A row per run, of the newest that fit a page (`render_in`): each counts against the panel's charts per page."""
+        return min(runs, context.page_size)
+
+    @classmethod
+    @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
         return {"key": ColumnKind.HISTOGRAM}
 

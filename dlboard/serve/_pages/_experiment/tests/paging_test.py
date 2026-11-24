@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from itertools import chain
+from itertools import chain, pairwise
 from typing import Any
 
 import pytest
@@ -60,6 +60,27 @@ def test_a_page_is_its_slice_of_the_items_and_a_number_out_of_range_the_nearest_
     assert list(chain.from_iterable(pages)) == items
     assert all(len(full) == per_page for full in pages[:-1])
     assert pages[-1] or not items  # only nothing at all is one empty page
+
+
+@given(
+    st.lists(st.integers(min_value=1, max_value=8), max_size=20),
+    st.integers(),
+    st.integers(min_value=1, max_value=6),
+)
+def test_a_weighted_page_holds_what_fits_its_budget_and_one_too_heavy_for_any_holds_it_alone(
+    weights: list[int], number: int, budget: int
+) -> None:
+    items = list(range(len(weights)))
+    page = paging.weighted_page_slice(items, weights, number, budget)
+    pages = [paging.weighted_page_slice(items, weights, at, budget).items for at in range(1, page.total + 1)]
+
+    assert page.number == sorted((1, number, page.total))[1]
+    assert page.items == pages[page.number - 1]
+    assert list(chain.from_iterable(pages)) == items
+    assert all(len(held) == 1 or sum(weights[i] for i in held) <= budget for held in pages)
+    assert all(sum(weights[i] for i in held) + weights[after[0]] > budget for held, after in pairwise(pages))
+    if all(weight == 1 for weight in weights):
+        assert page == paging.page_slice(items, number, budget)
 
 
 def test_visible_panels_filters_the_tab_before_slicing() -> None:

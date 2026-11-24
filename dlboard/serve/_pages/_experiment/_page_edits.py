@@ -27,7 +27,7 @@ from dlboard.serve._pages._experiment._focus import focus_banner
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._page_repository import load_page, ref_of, save_page
 from dlboard.serve._pages._experiment._paging import Paging, reveal, visible_open_panels
-from dlboard.serve._pages._experiment._panel_data import panel_frames
+from dlboard.serve._pages._experiment._panel_data import drawn_paging, panel_frames
 from dlboard.serve._pages._experiment._panel_view import accordion_view, resolved_paging
 from dlboard.serve._pages._experiment._shown_runs import page_scope
 
@@ -134,7 +134,7 @@ def render_panel_area(
 ) -> html.Div:
     """The panel area of `page`: the tabs and the page of panels `paging` shows, with the data of the charts open in them."""
     page = page.drawn()
-    paging = resolved_paging(page, paging, focus_chart=focus_chart)
+    paging = resolved_paging(page, drawn_paging(store, page, paging), focus_chart=focus_chart)
     open_panels = visible_open_panels(page.panels, paging.shown_tab(page.panels), paging)
     return accordion_view(
         panel_frames(store, page, paging, open_panels), page, paging, focus_banner(store, page, paging)

@@ -39,7 +39,7 @@ from dlboard.serve._pages._experiment._paging import (
     visible_chart_indexes,
     visible_open_panels,
 )
-from dlboard.serve._pages._experiment._panel_data import panel_frames
+from dlboard.serve._pages._experiment._panel_data import drawn_paging, panel_frames
 from dlboard.serve._pages._experiment._panel_view import (
     CHART_FILTER,
     CHART_PAGE_SIZE_ID,
@@ -153,6 +153,9 @@ def _register_paging(app: Dash) -> None:
             store,
             ref_of(BasicExperimentPage.model_validate_json(panel_ctx.page_json)),
         ).drawn()
+        # `runs_drawn` never reaches the browser, so both sides of the comparison below get it alike.
+        paging = drawn_paging(store, page, paging)
+        requested = requested.drawing(paging.runs_drawn)
         new_paging = clamped_paging(page, tab, requested.viewing(tab=tab)).normalized(page.panels)
         # A control mounting reports its current value back as a "change" -- nothing to do for that.
         if new_paging == paging and tab == rendered_tab:
@@ -201,6 +204,7 @@ def _register_paging(app: Dash) -> None:
 
         store = get_data_store()
         page = load_page(store, ref_of(BasicExperimentPage.model_validate_json(chart_ctx.page_json))).drawn()
+        requested = drawn_paging(store, page, requested)
         panel_by_name = {p.name: p for p in page.panels}
         changed = {
             name
@@ -301,6 +305,7 @@ def register_panel_area_callbacks(app: Dash) -> None:
         # remount can itself be the tail end of an edit that just branched into a new view.
         curr_page = BasicExperimentPage.model_validate_json(opened.page_json)
         page = load_page(store, ref_of(curr_page)).drawn()
+        paging = drawn_paging(store, page, paging)
         panel_by_name = {p.name: p for p in page.panels}
         rendered = newly_opened & panel_by_name.keys()
         frames = panel_frames(store, page, paging, rendered)

@@ -228,6 +228,9 @@ Subclass `ChartType` and implement its abstract methods:
   Auto-generating and suggesting charts give an artifact key the first built-in chart type that says yes; an artifact no chart type claims simply gets no generated chart.
 - `can_display_run_context() -> bool` (optional, `False` by default) — say that this chart type, with its default settings, shows what produced each run.
   An experiment any of whose runs recorded a context gets a chart of the first built-in chart type that says yes, in a "Run context" panel, and an artifact that chart type claims is left to it rather than charted on its own.
+- `plots(parameters, runs, context) -> int` (optional, 1 by default) — how many plots the chart draws when its panel draws `runs` runs, each of which counts against the panel's charts per page.
+  The histogram chart draws a heatmap row per run, at most `context.page_size` of them, so with ten runs drawn it counts as ten charts, and a page of histograms draws no more plots than a page of line charts.
+  A chart heavier than a whole page is a page of its own.
 - `fixed_table_rows(parameters, choices)` (optional, none by default) — the rows of a table setting that the chart draws whether or not they are saved, by setting name and then each row's key and the label it is shown by.
   The image chart draws every overlay logged over its picture and saves only the ones it was told to treat differently, so its Layers table would be empty for a chart that draws two layers; this lists each as a row.
   A fixed row can be restyled but not renamed or removed, since removing it would change nothing, and it starts blank, which stands for every default: make the settings model leave out a row that is all defaults, so that saving what the editor lists changes nothing.
