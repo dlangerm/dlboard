@@ -7,8 +7,11 @@ which `app()` serves once for the whole app rather than each page or chart that 
 
 from __future__ import annotations
 
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Final, Literal
+
+import dash_ag_grid as dag
 
 ColumnDType = Literal["numeric", "text"]
 """An ag-grid column dtype, as inferred by `infer_column_dtype`."""
@@ -64,12 +67,30 @@ SCORE_FORMATTER: Final = {"function": "dlboardScore(params)"}
 
 
 def column_def(name: str, dtype: ColumnDType, **extra: Any) -> dict[str, Any]:  # noqa: ANN401
-    """Build one ag-grid `columnDefs` entry, `**extra` merged in last so callers can override any key."""
+    """
+    Build one ag-grid `columnDefs` entry, `**extra` merged in last so callers can override any key.
+
+    Its header says its whole name in a tooltip where the column is too narrow for it (`grid`'s `tooltipShowMode`).
+    """
     base: dict[str, Any] = {"field": name, "headerName": name, "sortable": True, "filter": True}
     if dtype == NUMERIC:
         base["filter"] = "agNumberColumnFilter"
         base["valueFormatter"] = NUMBER_FORMATTER
-    return {**base, **extra}
+    merged = {**base, **extra}
+    return {"headerTooltip": merged["headerName"], **merged}
+
+
+CELL_TOOLTIP: Final = {"function": "dlboardCellTooltip(params)"}
+"""What a cell cut off says in its tooltip: what it shows, whole (`GRID_FORMATTERS_JS`)."""
+
+
+class Tooltips(StrEnum):
+    """Which of a grid's cells have a tooltip (ag-grid decides it for the whole grid, never a column)."""
+
+    WHEN_CUT_OFF = "when cut off"
+    """Every cell and header that cut its text off says it whole; one that shows it all has none."""
+    COLUMNS_OWN = "columns' own"
+    """Only the columns that ask for one (`tooltipField`), always: a grid whose tooltips say more than a cell shows."""
 
 
 DEFAULT_TABLE_FONT_SIZE = "var(--mantine-font-size-sm)"
@@ -77,28 +98,54 @@ DEFAULT_TABLE_FONT_SIZE = "var(--mantine-font-size-sm)"
 than ag-grid's default text."""
 
 
-def themed_grid_kwargs(*, font_size: str = DEFAULT_TABLE_FONT_SIZE, class_name: str = "") -> dict[str, Any]:
-    """
-    CSS-var-driven style/className kwargs so an `AgGrid` matches the Mantine theme (incl. dark mode).
-
-    Spread into a `dash_ag_grid.AgGrid(...)` call: `AgGrid(..., **themed_grid_kwargs())`. `class_name`
-    adds a class of the caller's own, for its stylesheet to pick the grid out by.
-    """
+def _themed_style(font_size: str) -> dict[str, str]:
+    """CSS-var-driven style so an `AgGrid` matches the Mantine theme (incl. dark mode)."""
     return {
-        "className": f"ag-theme-quartz {class_name}".strip(),
-        "style": {
-            "width": "100%",
-            "--ag-background-color": "var(--mantine-color-body)",
-            "--ag-foreground-color": "var(--mantine-color-text)",
-            "--ag-header-background-color": "var(--mantine-color-default-hover)",
-            "--ag-header-foreground-color": "var(--mantine-color-text)",
-            "--ag-border-color": "var(--mantine-color-default-border)",
-            "--ag-row-border-color": "var(--mantine-color-default-border)",
-            "--ag-odd-row-background-color": "var(--mantine-color-default-hover)",
-            "--ag-row-hover-color": "var(--mantine-color-default-hover)",
-            "--ag-selected-row-background-color": "var(--mantine-primary-color-light)",
-            "--ag-font-family": "var(--mantine-font-family)",
-            "--ag-font-size": font_size,
-            "--ag-border-radius": "var(--mantine-radius-md)",
-        },
+        "width": "100%",
+        "--ag-background-color": "var(--mantine-color-body)",
+        "--ag-foreground-color": "var(--mantine-color-text)",
+        "--ag-header-background-color": "var(--mantine-color-default-hover)",
+        "--ag-header-foreground-color": "var(--mantine-color-text)",
+        "--ag-border-color": "var(--mantine-color-default-border)",
+        "--ag-row-border-color": "var(--mantine-color-default-border)",
+        "--ag-odd-row-background-color": "var(--mantine-color-default-hover)",
+        "--ag-row-hover-color": "var(--mantine-color-default-hover)",
+        "--ag-selected-row-background-color": "var(--mantine-primary-color-light)",
+        "--ag-font-family": "var(--mantine-font-family)",
+        "--ag-font-size": font_size,
+        "--ag-border-radius": "var(--mantine-radius-md)",
     }
+
+
+def grid(  # noqa: PLR0913 -- what every grid sets, each once, beside the rest of `AgGrid`'s props
+    *,
+    dashGridOptions: dict[str, Any] | None = None,  # noqa: N803 -- `AgGrid`'s own names, passed through
+    defaultColDef: dict[str, Any] | None = None,  # noqa: N803
+    tooltips: Tooltips = Tooltips.WHEN_CUT_OFF,
+    font_size: str = DEFAULT_TABLE_FONT_SIZE,
+    class_name: str = "",
+    style: dict[str, str] | None = None,
+    **kwargs: Any,  # noqa: ANN401 -- the rest of `AgGrid`'s props, as it takes them
+) -> dag.AgGrid:
+    """
+    A `dash_ag_grid.AgGrid` as every table in the app is one: themed to Mantine (dark mode too), and with `tooltips`.
+
+    A grid's own `dashGridOptions`, `defaultColDef` and `style` are merged over these; `class_name` is a class of its
+    own, for its stylesheet to pick it out by. The one way a grid is made (the `forbid_strings` hook refuses a grid made
+    anywhere else), so none goes without the tooltips that say what a cut-off cell holds.
+    """
+    options: dict[str, Any]
+    columns: dict[str, Any]
+    match tooltips:
+        case Tooltips.WHEN_CUT_OFF:
+            options = {"tooltipShowMode": "whenTruncated", "tooltipShowDelay": 300}
+            columns = {"tooltipValueGetter": CELL_TOOLTIP}
+        case Tooltips.COLUMNS_OWN:
+            options, columns = dict[str, Any](), dict[str, Any]()
+    return dag.AgGrid(  # dlboard-ignore[forbid-string-ignore]
+        dashGridOptions={**options, **(dashGridOptions or {})},
+        defaultColDef={**columns, **(defaultColDef or {})},
+        className=f"ag-theme-quartz {class_name}".strip(),
+        style={**_themed_style(font_size), **(style or {})},
+        **kwargs,
+    )

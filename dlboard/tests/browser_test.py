@@ -3705,6 +3705,10 @@ def test_a_table_of_artifacts_shows_thumbnails_and_sorts_by_a_tag(
         assert box is not None
         assert 0 < box["height"] <= 56  # fitted to the row, not the 400px it was logged at
         assert images.nth(index).evaluate("img => img.naturalWidth") > 0
+    # A picture is not text a cell cut off: no tooltip of its markdown, once the tooltip delay (300 ms) has passed.
+    images.first.hover()
+    page.wait_for_timeout(1000)
+    expect(page.locator(".ag-tooltip")).to_have_count(0)
 
     score = chart.get_by_role("columnheader", name="score")
     score.locator(".ag-header-cell-label").click()

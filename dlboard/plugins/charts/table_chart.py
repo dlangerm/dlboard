@@ -65,8 +65,8 @@ from dlboard.serve._grid import (
     NUMERIC,
     TEXT,
     column_def,
+    grid,
     infer_column_dtype,
-    themed_grid_kwargs,
 )
 
 _IDENTITY_COLS = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN, EXPERIMENT_COLUMN})
@@ -132,7 +132,7 @@ def _table(
         leaf["field"] for column in column_defs for leaf in column.get("children", [column])
     ]
     font_size = f"{parameters.font_size}px" if parameters.font_size else DEFAULT_TABLE_FONT_SIZE
-    return dag.AgGrid(
+    return grid(
         id={"type": _GRID_TYPE, "chart": context.chart_id},
         columnDefs=column_defs,
         rowData=rows,
@@ -157,7 +157,8 @@ def _table(
             "suppressFieldDotNotation": True,
             **({"rowHeight": _THUMBNAIL_ROW_HEIGHT} if thumbnails else {}),
         },
-        **themed_grid_kwargs(font_size=font_size, class_name="dl-table-chart"),
+        font_size=font_size,
+        class_name="dl-table-chart",
     )
 
 

@@ -106,6 +106,11 @@ FORBIDDEN_STRINGS: typing.Final = (
             "`cast`, and mark the line."
         ),
     ),
+    # Every table is made one way, so none goes without the tooltips that say what a cut-off cell holds.
+    ForbiddenString(
+        pattern=re.compile(r"\bAgGrid\("),
+        message="Make a grid with `dlboard.serve._grid.grid`, which themes it and gives it tooltips for cut-off text.",
+    ),
 )
 
 

@@ -10,7 +10,6 @@ from __future__ import annotations
 import typing
 from typing import Any, Final
 
-import dash_ag_grid as dag
 import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -31,10 +30,11 @@ from dlboard.models import (
     artifact_column,
 )
 from dlboard.serve import series_swatch_class
-from dlboard.serve._grid import TEXT, column_def, themed_grid_kwargs
+from dlboard.serve._grid import TEXT, column_def, grid
 
 if typing.TYPE_CHECKING:
     import dash
+    import dash_ag_grid as dag
 
 _SECTION_LABELS: Final = {
     ContextSection.GIT: "Git",
@@ -152,7 +152,7 @@ def context_rows(parameters: RunContextSettings, runs: list[_Run]) -> list[dict[
 
 
 def _grid(parameters: RunContextSettings, runs: list[_Run], rows: list[dict[str, Any]]) -> dag.AgGrid:
-    return dag.AgGrid(
+    return grid(
         columnDefs=[
             column_def("section", TEXT, headerName="Section", width=110, pinned="left"),
             column_def("fact", TEXT, headerName="Fact", width=170, pinned="left", floatingFilter=True),
@@ -177,7 +177,7 @@ def _grid(parameters: RunContextSettings, runs: list[_Run], rows: list[dict[str,
             "domLayout": "autoHeight",
             "tooltipShowDelay": 400,
         },
-        **themed_grid_kwargs(class_name="dl-run-context"),
+        class_name="dl-run-context",
     )
 
 

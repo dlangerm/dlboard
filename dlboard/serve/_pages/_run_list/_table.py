@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Final
 
-import dash_ag_grid as dag
-
 from dlboard.models import MetricColumn
 from dlboard.serve import series_swatch_class
-from dlboard.serve._grid import themed_grid_kwargs
+from dlboard.serve._grid import Tooltips, grid
 from dlboard.serve._pages._run_list._columns import (
     EXPERIMENT_FIELD,
     FOCUSED_FIELD,
@@ -18,6 +16,8 @@ from dlboard.serve._pages._run_list._columns import (
 
 if TYPE_CHECKING:
     from collections.abc import Collection
+
+    import dash_ag_grid as dag
 
 ROW_HEIGHT: Final = 34
 TWO_LINE_ROW_HEIGHT: Final = 46
@@ -58,15 +58,16 @@ def run_grid(
     15-run one does. A run drawn in the charts has its color there as a dot (`swatches`).
     """
     row_height = TWO_LINE_ROW_HEIGHT if any(EXPERIMENT_FIELD in row for row in rows) else ROW_HEIGHT
-    grid = themed_grid_kwargs()
-    grid["className"] = f"{grid['className']} dl-run-table"
-    grid["style"] = {
-        **grid["style"],
-        # Less than ag-grid's default padding a side: in a sidebar this narrow it is a third of every column.
-        "--ag-cell-horizontal-padding": "8px",
-        "height": f"min({max(len(rows), 2) * row_height + ROW_HEIGHT + 2}px, {MAX_TABLE_HEIGHT})",
-    }
-    return dag.AgGrid(
+    return grid(
+        # Its pins and status say more than their cells show, so its columns keep their own tooltips; the run's name,
+        # which a narrow sidebar cuts off, has one too (`run_columns`).
+        tooltips=Tooltips.COLUMNS_OWN,
+        class_name="dl-run-table",
+        style={
+            # Less than ag-grid's default padding a side: in a sidebar this narrow it is a third of every column.
+            "--ag-cell-horizontal-padding": "8px",
+            "height": f"min({max(len(rows), 2) * row_height + ROW_HEIGHT + 2}px, {MAX_TABLE_HEIGHT})",
+        },
         id=table_id,
         columnDefs=column_defs,
         rowData=grid_rows(rows, swatches=swatches),
@@ -98,5 +99,4 @@ def run_grid(
             "tooltipShowDelay": 300,
             **options,
         },
-        **grid,
     )

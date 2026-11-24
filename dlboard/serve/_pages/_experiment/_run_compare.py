@@ -25,7 +25,6 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple, Self, cast
 
-import dash_ag_grid as dag
 import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, ctx
 from dash.dcc import Store
@@ -35,7 +34,7 @@ from pydantic import BaseModel, BeforeValidator, Field, model_validator
 from dlboard.models import MetricReduction, Run
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon, series_swatch_class
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
-from dlboard.serve._grid import themed_grid_kwargs
+from dlboard.serve._grid import grid
 from dlboard.serve._pages._dash_helpers import CallbackStates, notice, tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _ids as ids
@@ -533,7 +532,6 @@ def compare_components(
         if query.runs
         else list[dict[str, str]]()
     )
-    grid = themed_grid_kwargs()
     modal = dmc.Modal(
         id=COMPARE_MODAL_ID,
         title="Compare runs",
@@ -578,7 +576,7 @@ def compare_components(
                     align="flex-end",
                     wrap="nowrap",
                 ),
-                dag.AgGrid(
+                grid(
                     id=COMPARE_GRID_ID,
                     columnDefs=comparison_columns(shown.runs, run_experiment_names(store, shown.runs)),
                     rowData=shown.rows,
@@ -586,8 +584,7 @@ def compare_components(
                     dangerously_allow_code=True,
                     columnSize="responsiveSizeToFit",
                     dashGridOptions={"rowHeight": 34, "headerHeight": 34, "domLayout": "autoHeight"},
-                    className=f"{grid['className']} dl-compare-grid",
-                    style=grid["style"],
+                    class_name="dl-compare-grid",
                 ),
                 dmc.Group(
                     page_controls(shown),

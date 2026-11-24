@@ -6,7 +6,6 @@ import typing
 from pathlib import Path
 from typing import Any, Final
 
-import dash_ag_grid as dag
 import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel, Field, model_validator
@@ -29,10 +28,11 @@ from dlboard.models import (
 )
 from dlboard.plugins.charts._artifact_tags import parse_tags
 from dlboard.serve import AssetKind, serve_asset
-from dlboard.serve._grid import NUMERIC, SCORE_FORMATTER, TEXT, column_def, themed_grid_kwargs
+from dlboard.serve._grid import NUMERIC, SCORE_FORMATTER, TEXT, column_def, grid
 
 if typing.TYPE_CHECKING:
     import dash
+    import dash_ag_grid as dag
 
 _CSS_PATH: Final = Path(__file__).with_name("file_list.css")
 
@@ -123,7 +123,7 @@ def _group_of(tags: dict[str, TagValue]) -> str:
 
 def _grid(rows: list[dict[str, Any]], *, page_size: int) -> dag.AgGrid:
     has_scores = any(row["score"] is not None for row in rows)
-    return dag.AgGrid(
+    return grid(
         columnDefs=[
             column_def("run", TEXT, headerName="Run", flex=1),
             column_def("file", TEXT, headerName="File", cellRenderer="markdown", flex=2),
@@ -142,7 +142,7 @@ def _grid(rows: list[dict[str, Any]], *, page_size: int) -> dag.AgGrid:
             "paginationPageSizeSelector": sorted({page_size, 10, 25, 50}),
             "domLayout": "autoHeight",
         },
-        **themed_grid_kwargs(class_name="dl-file-list"),
+        class_name="dl-file-list",
     )
 
 

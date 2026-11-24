@@ -24,3 +24,14 @@ window.dashAgGridFunctions.dlboardScore = (params) =>
 // The colours a run is pinned in, as the words a text filter matches (`red blue`): what a pin chip above a run list filters by.
 window.dashAgGridFunctions.dlboardPinColors = (params) =>
     (params.data?._pins ?? []).map((pin) => pin.color).join(" ");
+
+// What a cell's tooltip says, shown only where the cell cut its text off (`tooltipShowMode: "whenTruncated"`): what the
+// cell shows, whole. A markdown link is its text; a cell that is not text (pins, a slider, a markdown picture such as a
+// table chart's thumbnail) has no tooltip.
+window.dashAgGridFunctions.dlboardCellTooltip = (params) => {
+    var shown = params.valueFormatted ?? params.value;
+    if (shown == null || typeof shown === "object" || /!\[[^\]]*\]\([^)]*\)/.test(String(shown))) {
+        return undefined;
+    }
+    return String(shown).replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+};

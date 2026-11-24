@@ -12,7 +12,6 @@ from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
-import dash_ag_grid as dag
 import dash_mantine_components as dmc
 from dash import Dash, Input, Output, dcc, html
 from pydantic import BaseModel, Field
@@ -21,7 +20,7 @@ from dlboard import models
 from dlboard.models import family_template
 from dlboard.serve import ClientsideScript, Icon, icon
 from dlboard.serve._component_ids import PatternId
-from dlboard.serve._grid import CHOICE_RENDERER, KEY_PICKER_EDITOR, SLIDER_RENDERER, themed_grid_kwargs
+from dlboard.serve._grid import CHOICE_RENDERER, KEY_PICKER_EDITOR, SLIDER_RENDERER, grid
 from dlboard.serve._pages._dash_helpers import TriggeredId
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT, first_matches
@@ -236,7 +235,7 @@ def _table_input(  # noqa: PLR0913
         [
             dmc.Text(label, size="sm", fw=500),
             dmc.Text(field.description, size="xs", c="dimmed"),
-            dag.AgGrid(
+            grid(
                 id=_CHART_PARAM_TABLE.of(field_name),
                 columnDefs=columns,
                 rowData=[
@@ -257,7 +256,6 @@ def _table_input(  # noqa: PLR0913
                     # A row the chart supplies has no checkbox to tick (`grid_cell_components.css`).
                     "rowClassRules": {FIXED_ROW_CLASS: _IS_FIXED},
                 },
-                **themed_grid_kwargs(),
             ),
             dmc.Group(
                 [

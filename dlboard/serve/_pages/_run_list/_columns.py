@@ -131,6 +131,8 @@ def name_column_def(*, swatch: bool) -> dict[str, Any]:
             "function": f"params.data.{RUN_NAME_COLUMN} + ' ' + (params.data.{TAGS_FIELD} || []).join(' ')"
         },
         "cellRenderer": RUN_LINK_RENDERER,
+        # A sidebar this narrow cuts a long name off: its whole name is its tooltip.
+        "tooltipField": RUN_NAME_COLUMN,
         # The name is what the list is for: it takes what the narrow columns around it leave.
         "minWidth": NAME_MIN_WIDTH,
         # Each run's chart color as a dot before its name, so the list doubles as the legend.

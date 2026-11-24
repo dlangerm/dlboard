@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import pytest
 
+from dlboard.conftest import props
 from dlboard.serve._grid import (
+    CELL_TOOLTIP,
     NUMBER_FORMATTER,
     NUMERIC,
     TEXT,
     ColumnDType,
+    Tooltips,
     column_def,
+    grid,
     infer_column_dtype,
-    themed_grid_kwargs,
 )
 
 
@@ -34,6 +37,32 @@ def test_only_a_numeric_column_is_formatted_as_a_number(dtype: ColumnDType, form
     assert column_def("k", dtype).get("valueFormatter") == formatter
 
 
-def test_themed_grid_kwargs_has_expected_keys() -> None:
-    kwargs = themed_grid_kwargs()
-    assert set(kwargs) == {"className", "style"}
+def test_a_grid_is_themed_with_a_class_and_style_of_its_own_merged_over_the_themes() -> None:
+    made = props(
+        grid(id="g", class_name="dl-mine", style={"height": "40px"}, dashGridOptions={"rowHeight": 30})
+    )
+
+    assert made["className"] == "ag-theme-quartz dl-mine"
+    assert made["style"]["height"] == "40px"
+    assert made["style"]["--ag-background-color"] == "var(--mantine-color-body)"
+    assert made["dashGridOptions"]["rowHeight"] == 30
+
+
+@pytest.mark.parametrize(
+    ("tooltips", "options", "columns"),
+    [
+        (Tooltips.WHEN_CUT_OFF, {"tooltipShowMode": "whenTruncated"}, {"tooltipValueGetter": CELL_TOOLTIP}),
+        (Tooltips.COLUMNS_OWN, {}, {}),
+    ],
+)
+def test_a_grid_says_what_a_cut_off_cell_holds_unless_its_columns_say_more(
+    tooltips: Tooltips, options: dict[str, str], columns: dict[str, object]
+) -> None:
+    made = props(grid(id="g", tooltips=tooltips, defaultColDef={"minWidth": 100}))
+
+    assert made["dashGridOptions"].get("tooltipShowMode") == options.get("tooltipShowMode")
+    assert made["defaultColDef"] == {**columns, "minWidth": 100}
+
+
+def test_a_columns_header_says_its_whole_name_where_it_is_cut_off() -> None:
+    assert column_def("k", TEXT, headerName="A long name").get("headerTooltip") == "A long name"
