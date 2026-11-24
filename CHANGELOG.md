@@ -11,6 +11,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-11-24
+
 ### Added
 
 * **A table says in a tooltip what a cell cut off.**
