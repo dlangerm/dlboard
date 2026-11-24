@@ -2876,6 +2876,7 @@
   "dlboard/tests/console_browser_test.py::test_the_run_picker_lists_the_newest_run_first_each_in_its_colours[chromium]": 6.654649064999376,
   "dlboard/tests/custodian_process_test.py::test_nothing_the_server_started_outlives_it_killed_outright": 4.691959286999918,
   "dlboard/tests/custodian_process_test.py::test_the_server_keeps_one_custodian_alive_and_stops_it_with_itself": 18.254942848998326,
+  "dlboard/tests/density_browser_test.py::test_a_page_is_compact_until_its_viewer_chooses_comfortable_and_stays_as_they_chose[chromium]": 3.050287288009713,
   "dlboard/tests/docs_links_test.py::test_every_relative_link_resolves[README.md]": 0.0019426280014158692,
   "dlboard/tests/docs_links_test.py::test_every_relative_link_resolves[docs/README.md]": 0.0018801809965225402,
   "dlboard/tests/docs_links_test.py::test_every_relative_link_resolves[docs/architecture.md]": 0.001341034996585222,

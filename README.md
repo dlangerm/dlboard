@@ -71,7 +71,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 - **Built for big experiments** — panels and the charts in them are paged and fuzzy-filterable, so an experiment with thousands of charts opens as fast as a small one, and every page and filter is a shareable link
 - **Artifact streaming** — log images, plots, and structured data; browse them in the UI
 - **Multi-project support** — organize experiments by project
-- **Light & dark mode** — built with Dash-Mantine for a modern UI
+- **Light & dark, compact or comfortable** — a dense layout that fits more charts on screen by default, with more room a click away in the account menu
 - **Lightweight client** — the Python client has minimal dependencies (no torch required unless you use Lightning)
 
 ## See It In Action

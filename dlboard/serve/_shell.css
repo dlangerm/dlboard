@@ -31,6 +31,23 @@
   --dl-series-8: #e66767;
 }
 
+/* A compact page (`_density.py`, stamped on <html> before it paints): Mantine's spacing scale, which every padding and
+   gap given as `xs`..`xl` takes, tightened. Mantine declares its own on `:root`, so this, on `:root` and an
+   attribute, wins whatever the order the stylesheets load in. */
+:root[data-dl-density="compact"] {
+  --mantine-spacing-xs: 0.375rem;
+  --mantine-spacing-sm: 0.5rem;
+  --mantine-spacing-md: 0.75rem;
+  --mantine-spacing-lg: 1rem;
+  --mantine-spacing-xl: 1.5rem;
+}
+
+/* And every table's rows and headers, which ag-grid sizes from its own grid unit rather than Mantine's spacing. */
+:root[data-dl-density="compact"] .ag-theme-quartz {
+  --ag-grid-size: 6px;
+  --ag-spacing: 6px;
+}
+
 * {
   scrollbar-width: thin;
 }

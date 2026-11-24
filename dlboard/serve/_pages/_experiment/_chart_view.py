@@ -314,15 +314,17 @@ def render_chart_item(
         id=CHART_CONTROLS_GROUP.of(panel.name, index),
         gap="xs",
         className="dl-chart-controls",
-        # Laid over the chart's top-right corner rather than given a row of their own: a chart's
-        # height is precious, and these only show on hover anyway.
+        # Floated on the card's top edge, at its right, rather than given a row of their own: a chart's height is
+        # precious, and these only show on hover anyway. On the edge, not inside the corner, so they cover the card's
+        # padding and not what the chart draws there -- a table's header, whose labels sort it.
         pos="absolute",
-        top=4,
-        right=4,
+        top=0,
+        right=8,
         bg="var(--mantine-color-body)",
+        bd="1px solid var(--mantine-color-default-border)",
         bdrs="sm",
         # Above a table's header, which the grid stacks over anything at 1 -- or Edit can't be clicked.
-        style={"zIndex": 10},
+        style={"zIndex": 10, "transform": "translateY(-50%)"},
     )
     # The badge (when present) must be a *sibling* of `hover_controls`, not nested inside it --
     # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge

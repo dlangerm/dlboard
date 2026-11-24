@@ -33,6 +33,13 @@ from dlboard.serve._backend._sql_store_base import SQLStoreBase
 from dlboard.serve._backend._startup_checks import add_startup_check, run_startup_checks
 from dlboard.serve._backend._theme import get_theme
 from dlboard.serve._clientside_script import ClientsideScript
+from dlboard.serve._density import (
+    DEFAULT_DENSITY,
+    DENSITY_STORE_ID,
+    density_control,
+    density_store,
+    install_density,
+)
 from dlboard.serve._grid import GRID_CELL_COMPONENTS_CSS, GRID_CELL_COMPONENTS_JS, GRID_FORMATTERS_JS
 from dlboard.serve._icons import Icon, icon, install_icons
 from dlboard.serve._jump import install_jump, jump_modal, jump_trigger
@@ -63,7 +70,7 @@ _ASSETS = [
     # The button of a pin's notice that compares every run pinned in its colour (`_pages/_pins/_row_pins.py`).
     (AssetKind.SCRIPT, Path(__file__).parent / "_pages" / "_pins" / "pin_notice_compare.js"),
 ]
-_COLOR_SCHEME_PRELOAD_JS = Path(__file__).with_name("color_scheme_preload.js").read_text()
+_PRELOAD_JS = Path(__file__).with_name("preload.js").read_text()
 _NAVBAR_STATE_JS = ClientsideScript(Path(__file__).with_name("navbar_state.js"))
 _NAVBAR_TOGGLE_JS = ClientsideScript(Path(__file__).with_name("navbar_toggle.js"))
 _NAVBAR_RESIZE_JS = Path(__file__).with_name("navbar_resize.js")
@@ -197,6 +204,7 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
         serve_asset(_app, kind, path.name, path.read_bytes())
     install_icons(_app)
     install_jump(_app)
+    install_density(_app)
     # A page left open across a deploy still sends the old callbacks' shape: say so, once, instead of a 500 per poll.
     install_stale_page_guard(_app)
     # Pure client-side: whether the navbar shows at all only depends on the URL, and its
@@ -227,7 +235,7 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     # A theme plugin's `plug()` has already run by now (inside `Dash(...)` above), so its theme
     # goes straight into the first response -- no callback, no flash of an unthemed page.
     theme = get_theme(_app)
-    _app.index_string = _preload_color_scheme(_app.index_string, theme)
+    _app.index_string = _preload(_app.index_string, theme)
     _app.layout = partial(_layout, theme)
     # Last, so a plugin's check sees the app exactly as it will serve -- every plugin plugged, the gate installed.
     add_startup_check(_app, _check_stored_timestamps)
@@ -242,13 +250,14 @@ def _check_stored_timestamps(app: Dash) -> None:
         store.check_stored_timestamps()
 
 
-def _preload_color_scheme(index_string: str, theme: ThemeSpec) -> str:
-    """Paint the theme's page background before any JS or Mantine CSS has loaded."""
+def _preload(index_string: str, theme: ThemeSpec) -> str:
+    """Paint the theme's page background, at the browser's density, before any JS or Mantine CSS has loaded."""
     background = theme.page_background
     preload = (
         f"<style>html[data-mantine-color-scheme=light]{{background-color:{background.light}}}"
         f"html[data-mantine-color-scheme=dark]{{background-color:{background.dark}}}</style>"
-        f'<script data-default-scheme="{escape(theme.default_color_scheme)}">{_COLOR_SCHEME_PRELOAD_JS}</script>'
+        f'<script data-default-scheme="{escape(theme.default_color_scheme)}" data-density-key="{DENSITY_STORE_ID}"'
+        f' data-default-density="{DEFAULT_DENSITY}">{_PRELOAD_JS}</script>'
     )
     return index_string.replace("<head>", f"<head>{preload}", 1)
 
@@ -362,6 +371,7 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
             jump_modal(),
             Store(id=constants.NAVBAR_COLLAPSED_STORE_ID, data=False, storage_type="local"),
             Store(id=constants.NAVBAR_WIDTH_STORE_ID, data=_NAVBAR_WIDTH.default, storage_type="local"),
+            density_store(),
         ],
         header={"height": 52},
         padding="md",
@@ -484,6 +494,8 @@ def _user_menu() -> Component:
                     dmc.MenuLabel("Signed in as"),
                     dmc.Text(user.username, size="sm", fw=600, px="sm"),
                     dmc.Text(f"via {provider.display_name}", size="xs", c="dimmed", px="sm", pb=6),
+                    dmc.MenuDivider(),
+                    *density_control(),
                     dmc.MenuDivider(),
                     dmc.MenuItem(
                         "Account",

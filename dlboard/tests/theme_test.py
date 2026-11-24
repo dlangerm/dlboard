@@ -60,6 +60,6 @@ def test_the_theme_is_in_the_first_response(
     provider = client.get("/_dash-layout").get_json()["props"]  # pyrefly: ignore [unknown-variable-type]
     dispose_stores(app)
 
-    assert f'<script data-default-scheme="{scheme}">' in index
+    assert f'<script data-default-scheme="{scheme}" ' in index
     assert provider["defaultColorScheme"] == scheme
     assert provider["theme"].get("primaryColor") == primary_color
