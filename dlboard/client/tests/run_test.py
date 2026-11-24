@@ -601,19 +601,26 @@ def test_flatten_hparams_joins_nested_configs_with_slashes(params: Any, expected
     assert run.flatten_hparams(params) == expected
 
 
-def test_a_run_logs_its_system_metrics_at_the_time_sampled_until_it_finishes(
+def test_a_run_logs_its_system_metrics_at_its_training_step_until_it_finishes(
     fake_api: FakeAPI, shippers: list[FakeShipper]
 ) -> None:
+    """A step is only ever a training step: a sample is at the one the run last logged at, 0 before the first."""
     started = run.init("proj")
     (sampler,) = fake_api.samplers
-    before = int(time.time())
 
     sampler.log({"system/cpu.utilization": 0.5})
+    started.log_metrics({"loss": 1.0}, step=40)
+    sampler.log({"system/cpu.utilization": 0.6})
+    started.log_histograms({"grad": [0.5, 1.5]}, step=41)
+    sampler.log({"system/cpu.utilization": 0.7})
     started.finish()
 
-    ((sample,),) = [item for item in [shippers[0].items] if item]
-    assert sample.metrics == {"system/cpu.utilization": 0.5}
-    assert before <= sample.step <= int(time.time())  # a Unix time, never a training step
+    samples = [item for item in shippers[0].items if "system/cpu.utilization" in item.metrics]
+    assert [(sample.step, sample.metrics["system/cpu.utilization"]) for sample in samples] == [
+        (0, 0.5),
+        (40, 0.6),
+        (41, 0.7),
+    ]
     assert sampler.stopped
 
 

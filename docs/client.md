@@ -123,13 +123,13 @@ This is the same requirement Python's own `multiprocessing` docs describe for an
 Install `dlboard-client[system]` and a run samples the host's CPU and memory and the training process's own, every 30 seconds; add `dlboard-client[gpu]` (NVML, NVIDIA's management library) and it samples each GPU the run can use too (`CUDA_VISIBLE_DEVICES`, as CUDA numbers them: `gpu0` is `cuda:0`): utilization, memory, temperature and power.
 They are two extras because NVML is missing or unusable on plenty of machines that still have a CPU worth watching: either works without the other, and NVML that can't start only turns the GPU part off.
 Each sample is ordinary metrics under `system/` (`system/cpu.utilization`, `system/hw.gpu.memory.usage/gpu0`, ...
-named after OpenTelemetry's semantic conventions), at a step that is the Unix time it was taken, so a resumed run's samples never land on its earlier ones; auto-generate charts them in a `system` panel against the time they were logged.
+named after OpenTelemetry's semantic conventions), at the run's training step when it was taken (the last step it logged metrics or histograms at, 0 before the first), so they line up with the run's other charts; auto-generate charts them in a `system` panel.
 They are read through OpenTelemetry instruments on a meter provider of the run's own: it is never made the global one, and nothing is exported anywhere but to the dlboard server.
 Sampling runs on a thread of its own in the training process (process metrics have to describe it), from the moment the run starts until it is finished, and costs a handful of rows per sample: 8 GPUs and the host are about 70 rows a minute.
 Set `DLBOARD_SYSTEM_METRICS_INTERVAL_S` to sample less often, or `DLBOARD_SYSTEM_METRICS_ENABLED=false` (or `RunSettings(system_metrics=...)`) to turn it off.
 Only rank 0 samples, so a multi-node job covers rank 0's node.
 
-![Line charts of each run's GPU utilization and process memory against the time they were sampled](images/system-metrics.png)
+![Line charts of each run's GPU utilization and process memory against the training step they were sampled at](images/system-metrics.png)
 
 **Console output.**
 A run captures what the script prints -- everything written to `sys.stdout` and `sys.stderr`, tracebacks included -- from its start until it is finished, and auto-generate gives it a `console` chart: each run's newest stretch of output with its latest line at the top (or, set to *oldest first*, its first stretch as printed), a pager through the rest (**Oldest**, **Older**, **Newer**, **Newest**, and which chunk is on show), and a filter over the lines on show.

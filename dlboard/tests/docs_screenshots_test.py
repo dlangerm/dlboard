@@ -239,7 +239,7 @@ def _system_samples(index: int, experiment_id: int, run_id: int) -> list[models.
     """
     A sweep run's system metrics, sampled every two minutes as it trained: its GPU's utilization and its process's memory.
 
-    Keyed and stepped as a run's sampler logs them (`system/...`, at the Unix time of the sample), from a generator of the
+    Keyed and stepped as a run's sampler logs them (`system/...`, at the training step of the sample), from a generator of the
     run's own, so they leave every other number in the demo as it was.
     """
     rng = np.random.default_rng(100 + index)
@@ -247,7 +247,7 @@ def _system_samples(index: int, experiment_id: int, run_id: int) -> list[models.
         models.LoggedMetrics(
             experiment_id=experiment_id,
             run_id=run_id,
-            step=int(when.timestamp()),
+            step=minute,
             metrics={
                 "system/hw.gpu.utilization/gpu0": float(
                     np.clip(0.82 + 0.04 * index + rng.normal(0, 0.03), 0, 1)
@@ -780,8 +780,7 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
                     chart_type="line",
                     parameters={
                         "column": column,
-                        "x_axis": "timestamp_utc",
-                        "x_axis_type": "date",
+                        "x_axis": "step",
                         "height": 240,
                         "width": 560,
                     },

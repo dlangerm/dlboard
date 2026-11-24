@@ -90,8 +90,7 @@ SYSTEM_METRIC_PREFIX: Final = "system/"
 """
 The keys a run's system metrics are logged under (`dlboard._telemetry.system`): `system/cpu.utilization`, ...
 
-Their step is the Unix time they were sampled at, not a training step, so a resumed run's samples never land on its
-earlier ones, and they are charted against time.
+Their step is the run's training step when they were sampled (`Run.step`), as every metric's is.
 """
 
 

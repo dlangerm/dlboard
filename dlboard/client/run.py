@@ -541,12 +541,12 @@ class _Stops(Protocol):
 
 def _log_system(run: Callable[[], Run | None], values: Mapping[str, float]) -> None:
     """
-    Log a system metrics sample into `run` (a weak reference: the sampler must not keep it alive), at the time taken.
+    Log a system metrics sample into `run` (a weak reference: the sampler must not keep it alive), at its step now.
 
-    Its step is the Unix time it was taken, not a training step (see `models.SYSTEM_METRIC_PREFIX`).
+    A step is only ever a training step: the sample is at the one the run last logged at (`Run.step`).
     """
     if (alive := run()) is not None:
-        alive.log_metrics(values, step=int(time.time()))
+        alive.log_metrics(values, step=alive.step)
 
 
 def _log_console(run: Callable[[], Run | None], chunk: ConsoleChunk) -> None:
@@ -586,6 +586,8 @@ class Run:
         self._helpers: list[_Stops] = []
         self.status: models.RunStatus | None = None
         """How this process last told the server the run ended, if it has."""
+        self.step = 0
+        """The training step this run was last logged at (`log_metrics`, `log_histograms`): a system sample's step."""
         if shipping is None:
             return
         # The shipping processes are daemons -- killed with whatever's still queued the moment the interpreter
@@ -742,6 +744,7 @@ class Run:
         it, instead of the server rejecting a whole batch of otherwise-good metrics later on. `step` is required:
         a counter kept here could not agree with another process sharing the run, or with a resumed one.
         """
+        self.step = step
         if (shipping := self._shipping) is None:
             return
         timestamp_utc = pendulum.now(pendulum.UTC)
@@ -770,6 +773,7 @@ class Run:
         by the script that chose it -- once, in one pass over the values -- and a binning that cannot fit
         (too many buckets) raises at this line. A `Histogram` you already binned is sent as it is.
         """
+        self.step = step
         if (shipping := self._shipping) is None:
             return
         shipping.metrics.put(
