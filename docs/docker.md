@@ -125,7 +125,7 @@ After that, admins can add more users and reset passwords from Admin → Users i
 Password sign-in means `dlboard serve local`'s "no key needed" shortcut doesn't apply here — a training script is a separate caller from your browser session, and it authenticates the way [client.md](client.md) describes for any signed-in deployment:
 
 1. Sign in at `http://localhost:8050` (or wherever you exposed it) with the user you created above.
-2. Create an API token on that user's Account page.
+2. Create an API token: the home page offers that user's first in one click, and their Account page makes more.
 3. Wherever `DLBoardLogger` runs, set `DLBOARD_API_KEY` to that token and point it at the server:
 
    ```python

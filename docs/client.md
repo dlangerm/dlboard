@@ -80,7 +80,7 @@ A server that refuses fails the logger's construction, with its reason in the er
 **Authenticating.**
 If the server signs people in (see [Auth](plugins/auth.md)), the script has to sign in too:
 
-- Create an API token on your Account page.
+- Create an API token: until you have one, the home page offers to make your first in one click, and the Account page makes more.
 - Set it as `DLBOARD_API_KEY` wherever the script runs, or pass `api_key=` to `BasicDlboardAPI`.
 
 Before it starts, the logger checks the key with the server's `/api/v1/whoami` and fails right away if it's missing or wrong.

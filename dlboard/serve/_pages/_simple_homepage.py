@@ -10,7 +10,7 @@ from dash.exceptions import PreventUpdate
 from dlboard import models
 from dlboard.serve import Icon, get_data_store, icon
 from dlboard.serve._pages._dash_helpers import entity_card
-from dlboard.serve._pages._onboarding import first_project_snippet, onboarding_card
+from dlboard.serve._pages._onboarding import api_key_step, first_project_snippet, onboarding_card
 from dlboard.serve._url import relative_path
 
 PROJECT_LIST_ID: typing.Final = "project-list-id"
@@ -48,6 +48,8 @@ def _project_card(project: models.Project, stats: models.ProjectStats) -> Compon
 def render_homepage() -> dmc.Container:
     """The whole homepage, rendered in the page's own `layout()` -- no callback round trip."""
     grid, count = _project_grid(get_data_store())
+    # An empty list's onboarding card makes the viewer's first key; one with projects asks above them.
+    key_step = api_key_step() if count else None
     return dmc.Container(
         [
             dmc.Group(
@@ -78,6 +80,7 @@ def render_homepage() -> dmc.Container:
                 align="flex-end",
                 mb="lg",
             ),
+            *([dmc.Box(key_step, mb="lg")] if key_step is not None else []),
             dmc.Box(grid, id=PROJECT_LIST_ID),
         ],
         size="lg",

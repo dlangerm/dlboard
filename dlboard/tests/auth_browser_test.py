@@ -28,6 +28,7 @@ from dlboard.plugins.data_stores import filesystem, sqlite
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._account_page import CREATE_TOKEN_ID, NEW_TOKEN_ID, TOKEN_NAME_ID
+from dlboard.serve._pages._onboarding import CREATE_FIRST_KEY_ID, FIRST_KEY_ID
 from dlboard.serve._pages._project_members import ADD_BUTTON_ID, ADD_GRANTEE_ID
 
 if TYPE_CHECKING:
@@ -171,4 +172,33 @@ def test_an_admin_disables_a_user_from_the_users_tab(
     disabled = deployment.store.find_user("carol")
     assert disabled is not None
     assert disabled.disabled_at is not None
+    assert console_errors == []
+
+
+@pytest.mark.parametrize("has_projects", [False, True], ids=["empty", "with-projects"])
+def test_a_newcomer_makes_their_first_api_key_from_the_home_page_in_one_click(
+    page: Page, deployment: _Deployment, console_errors: list[str], has_projects: bool
+) -> None:
+    username = f"newcomer-{has_projects}"
+    newcomer = create_or_reset_user(deployment.store, username, _PASSWORD)
+    if has_projects:
+        project = _alices_project(deployment.store, f"shared-with-{username}")
+        deployment.store.set_project_grant(
+            models.NewProjectGrant(project_id=project.id, user_id=newcomer.id, role=models.ProjectRole.VIEWER)
+        )
+    _sign_in(page, deployment, username)
+
+    page.click(f"#{CREATE_FIRST_KEY_ID}")
+
+    notice = page.locator(f"#{FIRST_KEY_ID}")
+    expect(notice).to_contain_text("export DLBOARD_API_KEY=dlb_")
+    raw = re.search(r"dlb_\S+", notice.inner_text())
+    assert raw is not None
+    whoami = requests.get(
+        f"{deployment.url}/{WHOAMI_PATH}", headers={"Authorization": f"Bearer {raw.group(0)}"}, timeout=5
+    )
+    assert whoami.json()["username"] == username
+    page.reload()
+    expect(page.get_by_role("heading", name="Projects")).to_be_visible()
+    expect(page.locator(f"#{CREATE_FIRST_KEY_ID}")).to_have_count(0)
     assert console_errors == []

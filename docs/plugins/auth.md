@@ -122,7 +122,7 @@ The rest happens in the app:
 - Admins add users and reset passwords from Admin → Users.
   They can also disable users and grant admin there.
 - Project owners share a project from its page's Sharing tab.
-- Everyone creates API tokens for their training scripts on their Account page, then sets `DLBOARD_API_KEY` wherever `DLBoardLogger` runs (see [client.md](../client.md)).
+- Everyone creates API tokens for their training scripts (the home page offers a newcomer their first in one click, and the Account page makes more), then sets `DLBOARD_API_KEY` wherever `DLBoardLogger` runs (see [client.md](../client.md)).
 
 ## How do I build a provider
 

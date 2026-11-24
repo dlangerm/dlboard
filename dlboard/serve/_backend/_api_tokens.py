@@ -98,6 +98,16 @@ def mint_run_token(store: DataStore[...], user: User, run_id: int) -> tuple[mode
     return mint_api_token(store, user, f"run {run_id}", expires_at, run_id=run_id)
 
 
+def _live(token: models.ApiToken, now: AwareDatetime) -> bool:
+    return token.revoked_at is None and (token.expires_at is None or token.expires_at > now)
+
+
+def has_api_key(store: DataStore[...], user: User) -> bool:
+    """Whether `user` has a key a training script can log in with: a full token, neither revoked nor expired."""
+    now = pendulum.now(pendulum.UTC)
+    return any(_live(token, now) for token in store.list_api_tokens(user.id))
+
+
 def user_for_token(store: DataStore[...], raw: str) -> Bearer | None:
     """The (enabled) user an unexpired, unrevoked token `raw` authenticates as, and its run, else `None`."""
     shape = _TOKEN_SHAPE.fullmatch(raw)
@@ -109,8 +119,7 @@ def user_for_token(store: DataStore[...], raw: str) -> Bearer | None:
         token is None
         or not hmac.compare_digest(token.secret_hash, _hash(shape["secret"]))
         or shape["prefix"] != _prefix(token.run_id)
-        or token.revoked_at is not None
-        or (token.expires_at is not None and token.expires_at <= now)
+        or not _live(token, now)
     ):
         return None
     user = store.get_user(token.user_id)

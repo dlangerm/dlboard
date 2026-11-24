@@ -133,6 +133,7 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     from dlboard.serve._pages import (
         _account_page,
         _comparison,
+        _onboarding,
         _simple_admin_page,
         _simple_homepage,
         _simple_project_page,
@@ -168,6 +169,7 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
         _comparison,
         _simple_admin_page,
         _account_page,
+        _onboarding,
     ):
         page.register(_app)
     # Also core, non-optional: every chart that shows an artifact fetches it from this one route,

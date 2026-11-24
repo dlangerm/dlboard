@@ -11,6 +11,31 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **A table says in a tooltip what a cell cut off.**
+  Every table (the table chart, the file list, run compare, the chart settings form) shows the whole of a cell or header that is too narrow for it when you hover it, and nothing over a cell that shows it all; the run table's run names, which a narrow sidebar cuts off, say theirs too.
+* **A newcomer makes their first API key from the home page, in one click.**
+  On a server people sign in to, a training script needs an API key, which only the Account page made, so a new user's first run failed until they found it.
+  Until you have a key, the home page (and an empty project or experiment, beside the snippet that logs your first run) says so and offers **Create my API key**, which shows the `export DLBOARD_API_KEY=...` line to copy, once.
+
+### Changed
+
+* **The app is compact by default, and comfortable a click away.**
+  Padding and gaps are tighter everywhere, so a page shows more of its charts and tables at once: the experiment page fits six panels where it fitted four.
+  The account menu's **Density** switch brings back the roomier layout, and the browser remembers the choice, as it does the light or dark one.
+
+### Fixed
+
+* **System metrics are logged at the run's training step.**
+  A sample of CPU, memory or GPU use was logged at the Unix time it was taken, as if that were a step, so a chart of one against `step` (or under page or panel chart settings that set it) ran along an axis of epoch seconds.
+  A sample is now logged at the step the run last logged metrics or histograms at, and auto-generate charts it against `step` like any metric.
+  System metrics logged before this keep their old steps.
+* **A histogram chart's rows count against charts per page.**
+  A histogram chart draws a heatmap row per run, so a page of 12 histogram charts over 10 runs drew 120 heatmaps, more than charts per page allows, and took a long time to draw.
+  Each row now counts as a chart, so a page of histograms draws no more plots than charts per page says, and the panel's pager reaches the rest; a panel of 30 over 10 runs renders in 75 ms instead of 551 ms.
+  A chart plugin says how many plots it draws in `ChartType.plots`.
+
 ## [0.20.2] - 2026-11-23
 
 ### Changed

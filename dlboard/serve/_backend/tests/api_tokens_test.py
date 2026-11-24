@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pendulum
 import pytest
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 from dlboard import models
 from dlboard.serve._backend import _api_tokens
@@ -111,3 +115,40 @@ def test_a_run_token_is_bound_to_its_run_expires_and_is_not_listed_with_the_owne
     assert store.list_api_tokens(owner.id) == []
     # The same secret with a full token's prefix is not a full token: a token's prefix must say what it is.
     assert _api_tokens.user_for_token(store, "dlb_" + raw[4:]) is None
+
+
+class _Kind(StrEnum):
+    LIVE = "live"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+    RUN = "run"
+
+
+def _mint(store: SQLLiteStore, owner: models.User, kind: _Kind, run_id: int) -> str:
+    match kind:
+        case _Kind.LIVE:
+            return _api_tokens.mint_api_token(store, owner, "ci")[1]
+        case _Kind.REVOKED:
+            token, raw = _api_tokens.mint_api_token(store, owner, "ci")
+            store.revoke_api_token(token.id, owner.id)
+            return raw
+        case _Kind.EXPIRED:
+            return _api_tokens.mint_api_token(
+                store, owner, "ci", pendulum.now(pendulum.UTC).subtract(seconds=1)
+            )[1]
+        case _Kind.RUN:
+            return _api_tokens.mint_run_token(store, owner, run_id)[1]
+
+
+@settings(max_examples=25, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(kinds=st.lists(st.sampled_from(_Kind), max_size=4))
+def test_a_user_has_an_api_key_exactly_when_a_full_token_of_theirs_authenticates(
+    store: SQLLiteStore, experiment_id: int, kinds: list[_Kind]
+) -> None:
+    owner = store.get_or_create_user(models.Principal.unverified(f"owner-{uuid4().hex}"))
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+
+    raws = [_mint(store, owner, kind, run.id) for kind in kinds]
+
+    bearers = [_api_tokens.user_for_token(store, raw) for raw in raws]
+    assert _api_tokens.has_api_key(store, owner) is any(b is not None and b.run_id is None for b in bearers)
