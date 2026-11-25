@@ -1800,6 +1800,7 @@
   "dlboard/serve/_custodian/tests/task_store_test.py::test_racing_claimers_each_get_at_most_their_limit_and_never_the_same_item[sqlite]": 1.1043299749944708,
   "dlboard/serve/_custodian/tests/task_store_test.py::test_work_is_queued_once_a_key_and_claimed_in_batches_that_never_overlap[postgres]": 0.3599691620001977,
   "dlboard/serve/_custodian/tests/task_store_test.py::test_work_is_queued_once_a_key_and_claimed_in_batches_that_never_overlap[sqlite]": 1.1133509240025887,
+  "dlboard/serve/_custodian/tests/watchdog_test.py::test_a_custodian_beats_while_its_server_is_frozen_reading_the_beat": 2.0317586309975013,
   "dlboard/serve/_custodian/tests/watchdog_test.py::test_a_custodian_is_killed_when_its_heartbeat_is_stale_for_the_phase_it_is_in[beating]": 0.20251340600225376,
   "dlboard/serve/_custodian/tests/watchdog_test.py::test_a_custodian_is_killed_when_its_heartbeat_is_stale_for_the_phase_it_is_in[slow start]": 0.20312371099862503,
   "dlboard/serve/_custodian/tests/watchdog_test.py::test_a_custodian_is_killed_when_its_heartbeat_is_stale_for_the_phase_it_is_in[stalled]": 0.012658850999287097,

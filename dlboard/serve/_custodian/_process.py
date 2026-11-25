@@ -26,7 +26,6 @@ from dlboard.serve._custodian._supervisor import CustodianSettings, ExitCode, Su
 
 if TYPE_CHECKING:
     from multiprocessing.process import BaseProcess
-    from multiprocessing.sharedctypes import Synchronized
 
 _log = get_logger(__name__)
 
@@ -51,7 +50,18 @@ def die_with_parent() -> None:
     libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM, 0, 0, 0)
 
 
-def custodian_main(heartbeat: Synchronized[float], parent_pid: int) -> None:
+def new_heartbeat() -> ctypes.c_double:
+    """
+    The shared memory a custodian beats into and its server reads: one double, with no lock (#788).
+
+    A `Value`'s lock is shared with the server, which takes it to read the beat: a server killed while it held it left the
+    custodian's next beat waiting on it for good, its SIGTERM handled but its loop never reached again, so it outlived the
+    server. One process writes the beat and one reads it, and an aligned double is written whole, so nothing needs a lock.
+    """
+    return SPAWN_CONTEXT.RawValue(ctypes.c_double, _STARTING)
+
+
+def custodian_main(heartbeat: ctypes.c_double, parent_pid: int) -> None:
     """
     The custodian process: build the app as a worker does, then run its plugins' tasks until told to stop.
 
@@ -95,7 +105,7 @@ class CustodianProcess:
         self._settings = settings or CustodianSettings()
         self._stop_timeout_s = stop_timeout_s
         self._process: BaseProcess | None = None
-        self._heartbeat: Synchronized[float] | None = None
+        self._heartbeat: ctypes.c_double | None = None
         self._started = 0.0
         self._failures = 0
         self._stopping = threading.Event()
@@ -124,7 +134,7 @@ class CustodianProcess:
         self._end(timeout=self._stop_timeout_s)
 
     def _spawn(self) -> None:
-        heartbeat = SPAWN_CONTEXT.Value("d", _STARTING)
+        heartbeat = new_heartbeat()
         process = SPAWN_CONTEXT.Process(
             target=custodian_main, args=(heartbeat, os.getpid()), name="dlboard-custodian", daemon=False
         )

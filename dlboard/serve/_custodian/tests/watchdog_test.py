@@ -1,7 +1,13 @@
-"""The server's watch on its custodian: a custodian still starting (migrating) gets longer than one that stopped beating."""
+"""
+The server's watch on its custodian: a custodian still starting (migrating) gets longer than one that stopped beating, and
+a beat never waits on the server.
+"""
 
 from __future__ import annotations
 
+import os
+import signal
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -9,12 +15,14 @@ from typing import TYPE_CHECKING, cast, override
 
 import pytest
 
-from dlboard.serve._custodian._process import CustodianProcess
+from dlboard._mp_context import SPAWN_CONTEXT
+from dlboard.serve._custodian._process import CustodianProcess, new_heartbeat
 from dlboard.serve._custodian._supervisor import CustodianSettings
 
 if TYPE_CHECKING:
+    import ctypes
     from multiprocessing.process import BaseProcess
-    from multiprocessing.sharedctypes import Synchronized
+    from multiprocessing.synchronize import Event
 
 
 @dataclass
@@ -74,10 +82,38 @@ def test_a_custodian_is_killed_when_its_heartbeat_is_stale_for_the_phase_it_is_i
     process = _Process()
     custodian = _Watched(CustodianSettings(tick_s=0.01, stall_s=1, startup_s=50))
     custodian._process = cast("BaseProcess", process)
-    custodian._heartbeat = cast("Synchronized[float]", _Beat(beat))
+    custodian._heartbeat = cast("ctypes.c_double", _Beat(beat))
     custodian._started = time.monotonic() - started_ago
     threading.Timer(
         0.2, custodian._stopping.set
     ).start()  # nothing ends the watch but a restart: give it ticks
     custodian._watch()
     assert bool(process.ended) is ended
+
+
+def _read_forever(heartbeat: ctypes.c_double, ready: Event) -> None:
+    ready.set()
+    while True:
+        _ = heartbeat.value
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="freezes a process with SIGSTOP")
+def test_a_custodian_beats_while_its_server_is_frozen_reading_the_beat() -> None:
+    """A server stopped, or killed, in the middle of reading the beat holds nothing the custodian's next beat waits on (#788)."""
+    heartbeat, ready = new_heartbeat(), SPAWN_CONTEXT.Event()
+    server = SPAWN_CONTEXT.Process(target=_read_forever, args=(heartbeat, ready), daemon=True)
+    server.start()
+    assert server.pid is not None
+    try:
+        assert ready.wait(timeout=60)
+        for at in range(50):  # frozen wherever it happens to be: somewhere in its read, as often as not
+            time.sleep(0.005)
+            os.kill(server.pid, signal.SIGSTOP)
+            beat = threading.Thread(target=setattr, args=(heartbeat, "value", float(at)), daemon=True)
+            beat.start()
+            beat.join(timeout=2)
+            assert not beat.is_alive(), f"beat {at} waited on the frozen server"
+            os.kill(server.pid, signal.SIGCONT)
+    finally:
+        server.kill()
+        server.join()
