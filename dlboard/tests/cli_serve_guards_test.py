@@ -97,3 +97,30 @@ def test_debug_allows_the_loopback_default(monkeypatch: pytest.MonkeyPatch) -> N
     _cli._serve("whatever:PLUGINS", ServerRuntimeOptions(debug=True))
 
     assert built == [{"host": "127.0.0.1", "port": 8050, "debug": True}]
+
+
+class _TLSOn:
+    """`TLSSettings` with a certificate and key: what the guards below go by."""
+
+    enabled = True
+
+
+def test_debug_refuses_native_tls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Werkzeug's dev server would serve plain HTTP on a port the settings say is HTTPS."""
+    monkeypatch.setattr(_cli, "TLSSettings", _TLSOn)
+    with pytest.raises(SystemExit, match="plain HTTP only"):
+        _cli._serve("whatever:PLUGINS", ServerRuntimeOptions(debug=True))
+
+
+def test_local_refuses_to_follow_a_folder_with_native_tls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its follower ships to the server over loopback, where the server's certificate can't be verified."""
+    monkeypatch.setattr(_cli, "TLSSettings", _TLSOn)
+    stores = {"sqlite_location": tmp_path / "db.sqlite", "artifact_store_location": tmp_path / "artifacts"}
+    for opts in (
+        LocalServeOptions(**stores, logdir=tmp_path),
+        LocalServeOptions(**stores, tensorboard_logdir=tmp_path),
+    ):
+        with pytest.raises(SystemExit, match="don't work with native TLS"):
+            _cli.local(opts=opts)

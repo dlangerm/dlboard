@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import pendulum
 import requests
-from pydantic import AnyUrl, AwareDatetime, BaseModel, PositiveFloat, SecretStr
+from pydantic import AnyUrl, AwareDatetime, BaseModel, FilePath, PositiveFloat, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard import models
@@ -139,6 +139,18 @@ class ClientTimeoutSettings(BaseSettings):
     read_timeout_s: PositiveFloat = 60
 
 
+class ClientTLSSettings(BaseSettings):
+    """Which certificates the client trusts, from `DLBOARD_CA_BUNDLE`: a server with a private-CA or self-signed one."""
+
+    model_config = SettingsConfigDict(env_prefix="DLBOARD_")
+
+    ca_bundle: FilePath | None = None
+    """
+    A PEM file of the certificates to trust, instead of the system's. Unset, `requests` trusts what it does by default
+    (`certifi`, or `REQUESTS_CA_BUNDLE`).
+    """
+
+
 _LOOPBACK_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
@@ -211,6 +223,9 @@ class BasicDlboardAPI:
         self._session = requests.Session()
         timeouts = ClientTimeoutSettings()
         self._timeout = (timeouts.connect_timeout_s, timeouts.read_timeout_s)
+        # Given to every request, not set on the session: `requests` lets `REQUESTS_CA_BUNDLE` override a session's.
+        ca_bundle = ClientTLSSettings().ca_bundle
+        self._verify: str | bool = str(ca_bundle) if ca_bundle is not None else True
 
     def _send(  # noqa: PLR0913 -- the parts of a request, each optional but the method and route
         self,
@@ -256,6 +271,7 @@ class BasicDlboardAPI:
                 params=params,
                 headers={**self._headers, **content_type, REQUEST_ID_HEADER: request_id, **carrier()},
                 timeout=self._timeout,
+                verify=self._verify,
             )
             active.set(_ResponseTrace(status_code=res.status_code))
             if not res.ok:  # the caller decides whether this status is an error; the span records that it was

@@ -81,7 +81,8 @@ These are the ones every deployment needs; the full lists (TLS, pooling, timeout
 | `DLBOARD_TELEMETRY_METRICS` | no | `prometheus` to serve `/metrics`, `otlp` to push to a collector, or both -- the image has the `otel` extra. See [telemetry.md](telemetry.md). |
 | `DLBOARD_STARTUP_WAIT_S` | no | How long to keep retrying a database or object store that isn't reachable yet before giving up. Defaults to 120; `0` fails on the first error. |
 
-Serve it over HTTPS in front of a reverse proxy — session cookies are `Secure` by default, which most HTTP clients (browsers included, `localhost` sometimes excepted) silently refuse to send back over a plain-HTTP connection, breaking sign-in rather than just weakening it.
+Serve it over HTTPS, in front of a reverse proxy or by itself — session cookies are `Secure` by default, which most HTTP clients (browsers included, `localhost` sometimes excepted) silently refuse to send back over a plain-HTTP connection, breaking sign-in rather than just weakening it.
+To serve HTTPS from the container itself, mount the certificate and key and set `DLBOARD_SSL_CERTIFICATE` and `DLBOARD_SSL_KEYFILE` to their paths inside it ([Without a proxy](reverse-proxy.md#without-a-proxy-native-tls)); the image's health check follows, and `docker kill -s HUP` picks up a renewed certificate.
 `docker-compose.yml` sets `DLBOARD_SECURE_COOKIES=false` for exactly this reason, since it's plain HTTP by design — leave it at its default (`true`) everywhere else (see [auth.md](plugins/auth.md) for rate-limiting `/login` too).
 
 ### After a reboot

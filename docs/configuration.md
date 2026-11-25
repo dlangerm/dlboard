@@ -48,6 +48,8 @@ These tune the process that `dlboard serve` runs under (not used by `--debug`).
 | `DLBOARD_BACKPRESSURE` | `0` (Granian decides) | Requests a worker accepts at once; more wait in the socket backlog. |
 | `DLBOARD_HEADER_READ_TIMEOUT_S` | `30` | How long a client may take to send its request headers. Guards against slow-connection attacks. |
 | `DLBOARD_KEEP_ALIVE` | `true` | Keep HTTP/1 connections open between requests. |
+| `DLBOARD_SSL_CERTIFICATE` | none | Serve HTTPS from this certificate (with its chain, PEM), with no proxy in front. Needs `DLBOARD_SSL_KEYFILE`. See [Without a proxy](reverse-proxy.md#without-a-proxy-native-tls). |
+| `DLBOARD_SSL_KEYFILE` | none | The certificate's key (PEM, unencrypted). Replace both files and send the server `SIGHUP` to renew. |
 | `DLBOARD_STARTUP_WAIT_S` | `120` | How long to keep retrying a database or object store that cannot be reached yet before the server gives up starting. `0` fails on the first error. A wrong password or a missing bucket always fails at once. See [After a reboot](docker.md#after-a-reboot). |
 
 Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocking-threads` (default 16), not environment variables.
@@ -229,6 +231,7 @@ See [client.md](client.md).
 | `DLBOARD_USER` | OS login name | The username to attribute a run to on a server that doesn't verify identity. |
 | `DLBOARD_CONNECT_TIMEOUT_S` | `10` | How long a request waits to connect. |
 | `DLBOARD_READ_TIMEOUT_S` | `60` | How long a request waits for the server's response. |
+| `DLBOARD_CA_BUNDLE` | none | A PEM file of the certificates to trust instead of the system's, for a server with a self-signed or private-CA certificate. |
 | `DLBOARD_CONTEXT_GIT` | `true` | Record a new run's commit, branch, `origin` remote and whether tracked files had changes. See [client.md](client.md). |
 | `DLBOARD_CONTEXT_DIFF` | `false` | Upload those changes (`git diff HEAD`) as the run's `context/git.diff` artifact. Off unless asked for: uncommitted changes can hold secrets. |
 | `DLBOARD_CONTEXT_MAX_DIFF_KB` | `1024` | A bigger diff is left out, with a warning. |

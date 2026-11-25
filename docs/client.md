@@ -87,6 +87,10 @@ Before it starts, the logger checks the key with the server's `/api/v1/whoami` a
 Without that check, bad credentials would only show up later, as metrics that were never stored.
 `dlboard serve local` needs no key.
 
+**A server with its own certificate.**
+A server that serves HTTPS with a self-signed or private-CA certificate ([Without a proxy](reverse-proxy.md#without-a-proxy-native-tls)) isn't trusted by default.
+Point `DLBOARD_CA_BUNDLE` at a PEM file of the certificates to trust (the server's own, for a self-signed one): the client trusts those instead of the system's, for its requests alone, whatever `REQUESTS_CA_BUNDLE` says.
+
 **A job on a cluster: a run token.**
 A job that runs somewhere else (a SLURM or Kubernetes job, a shared cluster's vault) shouldn't carry your API token, which can do anything you can.
 Mint a *run token* where you submit the job instead, and hand the job that:

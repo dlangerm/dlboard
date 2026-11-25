@@ -74,9 +74,11 @@ EXPOSE 8050
 
 # `curl`/`wget` aren't in this slim image and installing either just for this would pull in apt
 # machinery this image otherwise never needs -- the base image's own python (already on PATH) can
-# hit the liveness route with nothing extra installed.
+# hit the liveness route with nothing extra installed. With native TLS on (`DLBOARD_SSL_CERTIFICATE`)
+# the port answers HTTPS only, under a certificate made out to the server's name, not 127.0.0.1: a
+# liveness check over loopback that sends nothing doesn't verify it.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8050/healthz', timeout=2).status == 200 else 1)"
+    CMD python -c "import os,ssl,sys,urllib.request; tls = bool(os.environ.get('DLBOARD_SSL_CERTIFICATE')); url = ('https' if tls else 'http') + '://127.0.0.1:8050/healthz'; sys.exit(0 if urllib.request.urlopen(url, timeout=2, context=ssl._create_unverified_context() if tls else None).status == 200 else 1)"
 
 ENTRYPOINT ["dlboard"]
 CMD ["serve", "custom", "--plugins", "dlboard.scripts.docker_deployment:PLUGINS", "--host", "0.0.0.0"]

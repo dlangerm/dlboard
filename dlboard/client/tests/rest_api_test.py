@@ -68,18 +68,8 @@ def test_create_project_sends_the_user_header(monkeypatch: pytest.MonkeyPatch) -
                 "deleted_at": None,
             }
 
-    def fake_request(
-        _method: str,
-        _url: str,
-        *,
-        data: str | None = None,
-        files: object = None,
-        headers: dict[str, str] | None = None,
-        timeout: tuple[float, float] | None = None,
-        params: dict[str, str] | None = None,
-    ) -> _FakeResponse:
-        del timeout, files, data, params
-        captured["headers"] = headers
+    def fake_request(_method: str, _url: str, **kwargs: Any) -> _FakeResponse:  # noqa: ANN401
+        captured["headers"] = kwargs["headers"]
         return _FakeResponse()
 
     api = backend.BasicDlboardAPI()

@@ -35,7 +35,7 @@ from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store, resolve_plugins, run_production_server, set_setting_env
 from dlboard.serve._custodian._process import CustodianProcess, die_with_parent
 from dlboard.serve._logging import configure_logging as _configure_logging
-from dlboard.serve._production_server import WSGISettings
+from dlboard.serve._production_server import TLSSettings, WSGISettings
 from dlboard.serve.telemetry import shared_prometheus_dir
 
 if TYPE_CHECKING:
@@ -123,6 +123,9 @@ def _serve(plugins_target: str, runtime: ServerRuntimeOptions) -> None:
             f"execute arbitrary Python -- refusing to bind it to {runtime.host!r}. Drop --debug, "
             "or keep --host at its loopback default."
         )
+        raise SystemExit(msg)
+    if runtime.debug and TLSSettings().enabled:
+        msg = "--debug serves plain HTTP only: unset DLBOARD_SSL_CERTIFICATE and DLBOARD_SSL_KEYFILE, or drop --debug."
         raise SystemExit(msg)
     if runtime.debug:
         # Flask's `run()` auto-loads a `.env`/`.flaskenv` from cwd via `python-dotenv` by default
@@ -263,6 +266,13 @@ def local(
             "admin, including purge. Pass --i-understand-anyone-who-can-reach-this-is-an-admin to "
             "proceed anyway (e.g. behind your own network boundary or reverse-proxy auth), or use "
             "`serve custom` with a real auth provider (see dlboard.plugins.PASSWORD_AUTH) instead."
+        )
+        raise SystemExit(msg)
+    if (opts.logdir or opts.tensorboard_logdir) and TLSSettings().enabled:
+        # They ship to this server over loopback, where its certificate (made out to its name) can't be verified.
+        msg = (
+            "--logdir and --tensorboard-logdir don't work with native TLS. Run `dlboard sync --watch` or "
+            "`dlboard import tensorboard --watch` against the server's https:// URL instead."
         )
         raise SystemExit(msg)
     set_setting_env(SqliteAppSettings, "sqlite_location", opts.sqlite_location)
