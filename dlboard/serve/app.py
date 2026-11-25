@@ -27,6 +27,7 @@ from dlboard.serve._backend._auth import (
     get_auth_provider,
     install_request_gate,
 )
+from dlboard.serve._backend._compression import install_compression
 from dlboard.serve._backend._data_store import get_data_store, get_system_data_store
 from dlboard.serve._backend._installed_plugins import set_installed_plugins
 from dlboard.serve._backend._sql_store_base import SQLStoreBase
@@ -184,6 +185,9 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     # A request id on every log line, and the request metrics, for every route (auth included) -- after
     # the gate, since it has to run ahead of it: see its own docstring.
     _request_logging.register(_app)
+    # After it, so that its `after_request` runs first (Flask runs them last-registered first): the request's logged
+    # duration includes compressing its response.
+    install_compression(_app)
     # Each request continues the trace of whoever sent it, with the SQL it runs as child spans. Last, so that it
     # sees every other request hook (the gate's included) and can put its own ahead of them all.
     telemetry.instrument_app(_app)

@@ -10,13 +10,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from dash import get_app
 
 from dlboard.conftest import dispose_stores
 from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dlboard.plugins.data_stores import filesystem, sqlite
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store
+from dlboard.serve._backend._app_slot import DASH_APP_EXTENSION
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -53,7 +53,8 @@ def test_readyz_is_ok_when_the_store_answers(client: FlaskClient) -> None:
 def test_readyz_is_unavailable_when_the_store_is_broken(
     client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    store: DataStore[...] = get_system_data_store(get_app())
+    # This client's own app, not Dash's `get_app()`: that is whichever app in the process served first, another test's.
+    store: DataStore[...] = get_system_data_store(client.application.extensions[DASH_APP_EXTENSION])
 
     def _broken(*_args: object, **_kwargs: object) -> None:
         msg = "db is down"

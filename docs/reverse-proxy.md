@@ -17,6 +17,8 @@ Any deployment with `PASSWORD_AUTH` that people reach over a network, and any us
    Without it dlboard sees every request as plain HTTP from the proxy's address, and sign-in fails.
 3. Allow large request bodies at the proxy: at least `DLBOARD_MAX_UPLOAD_MB` (default 256).
 4. Don't buffer or time out too aggressively on long requests; artifact uploads can take a while.
+5. dlboard compresses its responses itself (`DLBOARD_COMPRESS_RESPONSES`).
+   If the proxy compresses too, set `DLBOARD_COMPRESS_RESPONSES=false`, so that they aren't compressed twice.
 
 ## Caddy
 
