@@ -8,12 +8,11 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
-import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pendulum
 import psutil
@@ -21,18 +20,18 @@ import pytest
 import requests
 
 from dlboard import models
+from dlboard.conftest import DEADLINE_S, free_port, until
 from dlboard.plugins.backend.artifact_purge_worker import PurgeTask
 from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 from dlboard.serve._backend._purge_work import entity_purge
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Iterator
 
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="reads the process tree as Linux has it"
 )
 
-_DEADLINE_S = 20.0
 _SHUTDOWN_DEADLINE_S = 90.0
 """
 How long a server may take to exit after SIGTERM: its own budgets for stopping the custodian and the workers are 30s each
@@ -40,25 +39,9 @@ How long a server may take to exit after SIGTERM: its own budgets for stopping t
 """
 
 
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        _, port = cast("tuple[str, int]", s.getsockname())
-        return port
-
-
-def _until[T](what: str, check: Callable[[], T | None], timeout: float = _DEADLINE_S) -> T:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if (found := check()) is not None:
-            return found
-        time.sleep(0.2)
-    pytest.fail(f"timed out waiting for {what}")
-
-
 class _Server:
     def __init__(self, tmp_path: Path) -> None:
-        self.port = _free_port()
+        self.port = free_port()
         self.db = tmp_path / "db.sqlite"
         env = {
             **os.environ,
@@ -85,7 +68,7 @@ class _Server:
             stderr=subprocess.STDOUT,
         )
         try:
-            _until("the server to be ready", self._ready)
+            until("the server to be ready", self._ready)
         except BaseException:
             self.master.kill()
             self.master.wait()
@@ -108,7 +91,7 @@ class _Server:
             pids = [c.pid for c in recent if c.pid != not_pid and c.pid in children]
             return pids[0] if pids else None
 
-        return _until("a custodian to beat", beating)
+        return until("a custodian to beat", beating)
 
     def descendants(self) -> list[psutil.Process]:
         return psutil.Process(self.master.pid).children(recursive=True)
@@ -127,7 +110,7 @@ class _Server:
         for process in started:
             with contextlib.suppress(psutil.NoSuchProcess):  # gone with the server, as it should be
                 process.kill()
-        psutil.wait_procs(started, timeout=_DEADLINE_S)
+        psutil.wait_procs(started, timeout=DEADLINE_S)
         self.store.dispose()
         self.log.close()
 
@@ -166,7 +149,7 @@ def test_the_server_keeps_one_custodian_alive_and_stops_it_with_itself(server: _
     server.store.delete_project(project.id, admin)
     server.store.enqueue_work([entity_purge(models.EntityType.PROJECT, project.id, requested_by=admin.id)])
     server.store.request_task_run(PurgeTask.ENTITIES)
-    _until(
+    until(
         "the custodian to purge it",
         lambda: True if not list(server.store.list_deleted_projects()) else None,
     )
@@ -184,5 +167,5 @@ def test_nothing_the_server_started_outlives_it_killed_outright(server: _Server)
     everything = server.descendants()
     server.master.kill()
     server.master.wait()
-    _, alive = psutil.wait_procs(everything, timeout=_DEADLINE_S)
+    _, alive = psutil.wait_procs(everything, timeout=DEADLINE_S)
     assert alive == [], server.output()

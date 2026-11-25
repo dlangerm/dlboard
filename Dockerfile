@@ -73,10 +73,10 @@ WORKDIR /home/dlboard
 EXPOSE 8050
 
 # `curl`/`wget` aren't in this slim image and installing either just for this would pull in apt
-# machinery this image otherwise never needs -- the base image's own python (already on PATH) can
-# hit the liveness route with nothing extra installed.
+# machinery this image otherwise never needs: dlboard's own check asks the liveness route, over
+# HTTPS when native TLS is on (`DLBOARD_SSL_CERTIFICATE`).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8050/healthz', timeout=2).status == 200 else 1)"
+    CMD ["python", "-m", "dlboard.scripts.healthcheck"]
 
 ENTRYPOINT ["dlboard"]
 CMD ["serve", "custom", "--plugins", "dlboard.scripts.docker_deployment:PLUGINS", "--host", "0.0.0.0"]

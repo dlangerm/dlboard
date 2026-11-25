@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import inspect
+import shutil
+import socket
+import subprocess
 import threading
 import time
 import typing
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from enum import IntEnum, StrEnum
+from enum import Enum, IntEnum, StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
@@ -1091,3 +1094,62 @@ def _no_chart_fails_to_render(request: pytest.FixtureRequest) -> Iterator[None]:
         _structlog_configure(processors=processors)
     if failed and request.node.get_closest_marker("expects_chart_render_failure") is None:
         pytest.fail(f"a chart failed to render: {failed[0]}")
+
+
+# A real `dlboard serve` in a test: a port to give it, a wait for it, and a certificate for it.
+
+DEADLINE_S = 20.0
+"""How long a server gets to do what a test waits for (start, beat, serve a new certificate) on a loaded machine."""
+
+_KEY_PASSWORD = "pass:key-password"
+
+needs_openssl = pytest.mark.skipif(
+    shutil.which("openssl") is None, reason="makes its certificates with openssl"
+)
+
+
+def free_port() -> int:
+    """A port no one on this machine listens on now."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        _, port = cast("tuple[str, int]", s.getsockname())
+        return port
+
+
+def until[T](what: str, check: Callable[[], T | None], timeout: float = DEADLINE_S) -> T:
+    """What `check` returns once it returns something, polled; the test fails naming `what` if it never does."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if (found := check()) is not None:
+            return found
+        time.sleep(0.2)
+    pytest.fail(f"timed out waiting for {what}")
+
+
+class Key(Enum):
+    """How the key `make_certificate` writes is kept."""
+
+    PLAIN = "plain"
+    ENCRYPTED = "encrypted"
+    """With a password, as OpenSSL writes one: what Granian can't load."""
+
+
+def make_certificate(directory: Path, key: Key = Key.PLAIN) -> tuple[Path, Path]:
+    """A self-signed certificate for 127.0.0.1, and its key, made with `openssl`."""
+    directory.mkdir(exist_ok=True)
+    cert, key_file = directory / "cert.pem", directory / "key.pem"
+    encrypted = key is Key.ENCRYPTED
+    for command in (
+        [
+            *("openssl", "genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256"),
+            *("-out", str(key_file)),
+            *(("-aes-256-cbc", "-pass", _KEY_PASSWORD) if encrypted else ()),
+        ],
+        [
+            *("openssl", "req", "-x509", "-key", str(key_file), "-out", str(cert), "-days", "1"),
+            *("-subj", "/CN=dlboard", "-addext", "subjectAltName=IP:127.0.0.1"),
+            *(("-passin", _KEY_PASSWORD) if encrypted else ()),
+        ],
+    ):
+        subprocess.run(command, check=True, capture_output=True)
+    return cert, key_file

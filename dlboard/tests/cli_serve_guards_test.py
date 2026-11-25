@@ -12,6 +12,7 @@ import structlog
 
 from dlboard import _cli
 from dlboard._cli import LocalServeOptions, ServerRuntimeOptions
+from dlboard.conftest import make_certificate, needs_openssl
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -97,3 +98,32 @@ def test_debug_allows_the_loopback_default(monkeypatch: pytest.MonkeyPatch) -> N
     _cli._serve("whatever:PLUGINS", ServerRuntimeOptions(debug=True))
 
     assert built == [{"host": "127.0.0.1", "port": 8050, "debug": True}]
+
+
+@pytest.fixture
+def _tls_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A certificate and key in `DLBOARD_SSL_*`, as a deployment serving HTTPS itself has them."""
+    cert, key = make_certificate(tmp_path / "tls")
+    monkeypatch.setenv("DLBOARD_SSL_CERTIFICATE", str(cert))
+    monkeypatch.setenv("DLBOARD_SSL_KEYFILE", str(key))
+
+
+@needs_openssl
+@pytest.mark.usefixtures("_tls_on")
+def test_debug_refuses_native_tls() -> None:
+    """Werkzeug's dev server would serve plain HTTP on a port the settings say is HTTPS."""
+    with pytest.raises(SystemExit, match="plain HTTP only"):
+        _cli._serve("whatever:PLUGINS", ServerRuntimeOptions(debug=True))
+
+
+@needs_openssl
+@pytest.mark.usefixtures("_tls_on")
+def test_local_refuses_to_follow_a_folder_with_native_tls(tmp_path: Path) -> None:
+    """Its follower ships to the server over loopback, where the server's certificate can't be verified."""
+    db, artifacts = tmp_path / "db.sqlite", tmp_path / "artifacts"
+    for opts in (
+        LocalServeOptions(sqlite_location=db, artifact_store_location=artifacts, logdir=tmp_path),
+        LocalServeOptions(sqlite_location=db, artifact_store_location=artifacts, tensorboard_logdir=tmp_path),
+    ):
+        with pytest.raises(SystemExit, match="don't work with native TLS"):
+            _cli.local(opts=opts)

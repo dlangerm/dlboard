@@ -2,9 +2,9 @@
 
 ## What is this
 
-dlboard serves plain HTTP.
-To use it beyond your own machine, put a reverse proxy in front that terminates TLS.
-Sign-in cookies are marked `Secure` by default and are only sent back over HTTPS, so a password deployment needs this.
+dlboard serves plain HTTP unless it is given a certificate.
+To use it beyond your own machine, either put a reverse proxy in front that terminates TLS, or, for a small deployment, let dlboard serve HTTPS itself ([Without a proxy](#without-a-proxy-native-tls)).
+Sign-in cookies are marked `Secure` by default and are only sent back over HTTPS, so a password deployment needs one or the other.
 
 ## When you'd need this
 
@@ -72,6 +72,28 @@ location /dlboard/ {
     # ...same proxy_set_header lines as above
 }
 ```
+
+## Without a proxy (native TLS)
+
+A home lab or tailnet install that already has a certificate and key (from `tailscale cert`, Let's Encrypt or a private CA) can have dlboard serve HTTPS itself:
+
+```bash
+export DLBOARD_SSL_CERTIFICATE=/etc/dlboard/host.ts.net.crt   # the certificate, with its chain, as PEM
+export DLBOARD_SSL_KEYFILE=/etc/dlboard/host.ts.net.key       # its key, as PEM, unencrypted
+dlboard serve custom --plugins mydeployment:PLUGINS --host 0.0.0.0
+```
+
+- The port then answers HTTPS only (HTTP/2 or HTTP/1.1, as the client offers); plain HTTP to it is refused.
+  Leave `DLBOARD_TRUSTED_PROXIES` at `0`: requests really are HTTPS, so sign-in works as it is.
+- Set both or neither: half a pair, a key that isn't the certificate's, or an encrypted key fails at startup.
+  The key must be unencrypted (as `tailscale cert` and certbot write it), so keep it readable by dlboard's user alone.
+- **Renewal:** the workers read the files as they start.
+  After replacing them, send the server `SIGHUP` (`kill -HUP <pid>`, `docker kill -s HUP <container>`): it restarts its workers, which serve the new certificate.
+  `tailscale cert` certificates last about 90 days, so renew and signal from a timer.
+- A training script trusts a self-signed or private-CA certificate through `DLBOARD_CA_BUNDLE` (see [client.md](client.md), "A server with its own certificate").
+- `serve local --logdir` and `--tensorboard-logdir` don't work with native TLS: run `dlboard sync --watch` or `dlboard import tensorboard --watch` against the `https://` URL instead.
+
+Anything public still belongs behind a proxy or a gateway in front of dlboard: that is also where rate limiting and blocking abusive clients live, which dlboard leaves to them.
 
 ## Health checks
 

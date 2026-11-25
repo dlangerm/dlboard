@@ -11,13 +11,15 @@ path doesn't resolve, or resolves to something that isn't plugin-shaped.
 
 from __future__ import annotations
 
-from typing import Annotated
+import ssl
+from pathlib import Path
+from typing import Annotated, Self
 
 from granian import Granian
 from granian.constants import Interfaces
 from granian.http import HTTP1Settings
 from granian.log import LogLevels
-from pydantic import ImportString, NonNegativeInt, PositiveInt
+from pydantic import FilePath, ImportString, NonNegativeInt, PositiveInt, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from dlboard.models import PluginProtocol
@@ -69,6 +71,54 @@ class GranianSettings(BaseSettings):
     """Keep HTTP/1 connections open between requests. Turn off if a proxy in front mishandles idle connections."""
 
 
+class TLSSettings(BaseSettings):
+    """
+    `DLBOARD_SSL_*`: serve HTTPS from a certificate and key, with no reverse proxy in front (#797).
+
+    Both or neither: half a pair is a startup error, never a silent fall back to plain HTTP. With them, the port answers
+    HTTPS only (HTTP/2 or HTTP/1.1, as the client offers), and plain HTTP to it is refused.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="DLBOARD_SSL_")
+
+    certificate: FilePath | None = None
+    """The certificate, with its chain, as PEM."""
+    keyfile: FilePath | None = None
+    """
+    Its private key, as PEM, unencrypted (as `tailscale cert` and certbot write it): Granian can't read the encrypted keys
+    OpenSSL writes, so the file's permissions are what keep it private.
+    """
+
+    @model_validator(mode="after")
+    def _a_pair_that_loads(self) -> Self:
+        match self.certificate, self.keyfile:
+            case None, None:
+                return self
+            case Path() as certificate, Path() as keyfile:
+                # Loaded once here, where a key that isn't the certificate's, or is encrypted, can say so: a worker that
+                # can't load it panics, and the server exits with nothing else in its log. The password callback
+                # stands in for OpenSSL's, which would ask for an encrypted key's password on the terminal.
+                try:
+                    ssl.create_default_context(ssl.Purpose.CLIENT_AUTH).load_cert_chain(
+                        certificate, keyfile, password=lambda: ""
+                    )
+                except ssl.SSLError as error:
+                    msg = (
+                        f"DLBOARD_SSL_CERTIFICATE and DLBOARD_SSL_KEYFILE don't load as a pair ({error.reason}): "
+                        "the key must be the certificate's own, and unencrypted."
+                    )
+                    raise ValueError(msg) from error
+                return self
+            case _:  # half a pair
+                missing = "DLBOARD_SSL_CERTIFICATE" if self.certificate is None else "DLBOARD_SSL_KEYFILE"
+                msg = f"Native TLS needs a certificate and its key: set {missing} too, or unset the other."
+                raise ValueError(msg)
+
+    @property
+    def enabled(self) -> bool:
+        return self.certificate is not None
+
+
 def resolve_plugins(target: str) -> list[PluginProtocol]:
     """Import and validate the `list[PluginProtocol]` at `target`, e.g. `"myapp.deployment:PLUGINS"`."""
     return WSGISettings(dlboard_plugins=target).dlboard_plugins
@@ -86,7 +136,7 @@ def run_production_server(  # noqa: PLR0913
     """
     set_setting_env(WSGISettings, "dlboard_plugins", plugins_target)
     set_setting_env(WSGISettings, "dlboard_url_prefix", url_prefix)
-    tuning = GranianSettings()
+    tuning, tls = GranianSettings(), TLSSettings()
     granian = Granian(
         "dlboard.serve._wsgi:app",
         address=host,
@@ -104,6 +154,9 @@ def run_production_server(  # noqa: PLR0913
         http1_settings=HTTP1Settings(
             header_read_timeout=tuning.header_read_timeout_s * 1000, keep_alive=tuning.keep_alive
         ),
+        # Read by each worker as it starts, so a renewed certificate is served once the workers restart (SIGHUP).
+        ssl_cert=tls.certificate,
+        ssl_key=tls.keyfile,
     )
     # The custodian runs the background tasks in a process of its own, started before the workers and stopped after
     # them by this one (the master), never by a worker: see `dlboard/serve/_custodian/_process.py`.
