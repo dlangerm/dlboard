@@ -137,16 +137,16 @@ def _create_project_and_experiment(page: Page, live_server_url: str, name: str) 
     expect(page.locator(".experiment-card", has_text=name)).to_be_visible()
 
 
-def _diff_selected_runs(page: Page, count: int = 2) -> None:
+def _diff_runs(page: Page, *runs: models.Run) -> None:
     """
-    Select the newest `count` runs of the run table, and diff them from the bar that offers it once a run is selected.
+    Select `runs` in the run table, and diff them from the bar that offers it once a run is selected.
 
-    A row is found by where it is shown (`row-index`), not by its place in the DOM: ag-grid keeps the DOM in the order
-    the rows were drawn in, which is not the order they are shown in while it is still drawing them.
+    A row is found by its run's id (the grid's `getRowId`), never by its place: neither the DOM's order nor `row-index`
+    says which run a row is while ag-grid is still drawing them (#731).
     """
-    for index in range(count):
+    for run in runs:
         box = page.locator(
-            f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row[row-index='{index}'] "
+            f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row[row-id='{run.id}'] "
             ".ag-selection-checkbox input"
         )
         box.check()
@@ -2095,8 +2095,10 @@ def test_run_compare_modal_diffs_runs_and_its_state_is_a_shareable_link(
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
 
     api = BasicDlboardAPI(live_server_url)
+    runs: list[models.Run] = []
     for name, optimizer, loss in (("run-a", "adam", 0.5), ("run-b", "sgd", 0.4)):
         run = api.create_run(models.NewRun(experiment_id=experiment_id, name=name))
+        runs.append(run)
         api.log_hyperparams(
             models.NewHyperParams.from_raw(run.id, experiment_id, {"lr": 0.1, "optimizer": optimizer})
         )
@@ -2113,7 +2115,7 @@ def test_run_compare_modal_diffs_runs_and_its_state_is_a_shareable_link(
         )
     page.reload()
 
-    _diff_selected_runs(page)
+    _diff_runs(page, *runs)
     grid = page.locator(f"#{COMPARE_GRID_ID}")
     rows = grid.locator(".ag-center-cols-container .ag-row")
     # Opened on the selected runs (newest first, so run-b is the baseline); only differing keys are listed, with the other run's cell flagged.
@@ -2147,11 +2149,13 @@ def test_run_compare_finds_a_run_its_picker_does_not_list_by_searching_for_it(
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDlboardAPI(live_server_url)
-    for i in range(RUN_PICKER_LIMIT + 5):
+    runs = [
         api.create_run(models.NewRun(experiment_id=experiment_id, name=f"many-{i:03d}"))
+        for i in range(RUN_PICKER_LIMIT + 5)
+    ]
     page.reload()
 
-    _diff_selected_runs(page, 1)
+    _diff_runs(page, runs[-1])
     picker = page.locator(f"#{COMPARE_RUNS_ID}")
     picker.click()
     expect(page.get_by_role("option", name="many-054")).to_be_visible()
@@ -2175,8 +2179,10 @@ def test_run_compare_lists_its_keys_a_page_at_a_time_and_its_page_is_a_shareable
 
     api = BasicDlboardAPI(live_server_url)
     names = [f"metric_{i:03d}" for i in range(COMPARE_PAGE_SIZE + 10)]
+    runs: list[models.Run] = []
     for offset in (0.0, 1.0):
         run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        runs.append(run)
         api.log_metric_batch(
             [
                 models.LoggedMetrics(
@@ -2190,7 +2196,7 @@ def test_run_compare_lists_its_keys_a_page_at_a_time_and_its_page_is_a_shareable
         )
     page.reload()
 
-    _diff_selected_runs(page)
+    _diff_runs(page, *runs)
     rows = page.locator(f"#{COMPARE_GRID_ID} .ag-center-cols-container .ag-row")
     controls = page.locator(f"#{COMPARE_PAGE_SLOT_ID}")
     expect(rows).to_have_count(COMPARE_PAGE_SIZE)
