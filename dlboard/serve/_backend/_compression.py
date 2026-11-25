@@ -1,11 +1,11 @@
 """
-Compressing what the server sends (#798): zstd where the browser takes it, else Brotli, else gzip.
+Compression both ways: what the server sends (#798), and the request bodies a client compressed (#799).
 
-A reverse proxy in front usually compresses, but a server serving HTTPS itself (#797) has none, and what an experiment
-page downloads is mostly figure JSON (long numeric arrays, repeated keys) that compresses several times over: a page of
-seven line charts of eight 2,000-step runs came to 5.6 MB, and 1.0 MB as zstd. `flask-compress` negotiates the encoding
-from `Accept-Encoding`, and compresses only text-like types: a logged picture or archive, already compressed, is sent as
-it is.
+**Responses**: zstd where the browser takes it, else Brotli, else gzip. A reverse proxy in front usually compresses, but a
+server serving HTTPS itself (#797) has none, and what an experiment page downloads is mostly figure JSON (long numeric
+arrays, repeated keys) that compresses several times over: a page of seven line charts of eight 2,000-step runs came to
+5.6 MB, and 1.0 MB as zstd. `flask-compress` negotiates the encoding from `Accept-Encoding`, and compresses only
+text-like types: a logged picture or archive, already compressed, is sent as it is.
 
 Each encoding runs at its fastest level. On that page that was also the best trade: zstd took 15 ms at level 1 (5.6x
 smaller) and 26 ms at its default 3 (5.0x); Brotli 17 ms at 1 (5.4x) and 85 ms at its default 4; gzip, all a browser
@@ -14,18 +14,28 @@ offers over plain HTTP, 39 ms at 1 (4.4x) and 154 ms at its default 6.
 A client on this same machine gets nothing compressed: moving bytes over loopback costs nothing, so compressing them
 would only add the CPU time to every page. Behind a reverse proxy, that is the client the proxy says it is
 (`DLBOARD_TRUSTED_PROXIES`).
+
+**Request bodies** a client compressed (`ContentEncoding`) are decompressed before a route reads them, once the gate has let
+the request through, so no one it turns away can make the server decompress anything. What a body decompresses to is
+held to `DLBOARD_MAX_UPLOAD_MB` like any other body (413 past it), and an encoding this server doesn't take is a 415.
+`whoami` lists the encodings, so a client never sends one to a server that would refuse it.
 """
 
 from __future__ import annotations
 
+from http import HTTPStatus
+from io import BytesIO
 from ipaddress import IPv6Address, ip_address
 from typing import TYPE_CHECKING, Final
 
-from flask import request
+from flask import abort, request
 from flask_compress import Compress
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from werkzeug.wsgi import get_input_stream
 
 from dlboard._compat import StrEnum
+from dlboard._content_encoding import ContentEncoding, TooLargeError, decompress
+from dlboard.serve._backend._auth import RequestLimits
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -72,8 +82,37 @@ def _on_this_machine(address: str | None) -> bool:
     return parsed.is_loopback
 
 
+def _decompress_body() -> None:
+    """
+    Put a compressed request body back as the plain one, for whatever reads it next.
+
+    Swapped in under the WSGI environ, which `request.stream` is made from the first time anything reads the body: the
+    gate and the request log only ever read headers, so nothing has yet.
+    """
+    named = request.headers.get("Content-Encoding")
+    if not named:
+        return
+    if named.strip().lower() not in set(ContentEncoding):
+        abort(HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
+    limit = RequestLimits().max_upload_bytes
+    try:
+        body = decompress(get_input_stream(request.environ, max_content_length=limit).read(), limit)
+    except TooLargeError:
+        abort(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+    except ValueError:
+        abort(HTTPStatus.BAD_REQUEST)
+    request.environ.update({"wsgi.input": BytesIO(body), "CONTENT_LENGTH": str(len(body))})
+    request.environ.pop("HTTP_CONTENT_ENCODING")
+
+
 def install_compression(app: Dash) -> None:
-    """Compress `app`'s responses, unless switched off. Its own `after_request`, so request logging times it too."""
+    """
+    Take compressed request bodies, and compress `app`'s responses unless switched off.
+
+    Installed after the request gate, so its `before_request` runs after the gate's, and its `after_request` first, so
+    that the request log times compressing the response too (Flask runs those last-registered first).
+    """
+    app.server.before_request(_decompress_body)
     if not CompressionSettings().compress_responses:
         return
     app.server.config.update(_CONFIG)

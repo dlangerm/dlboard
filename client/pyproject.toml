@@ -22,6 +22,8 @@ classifiers = [
   "Typing :: Typed"
 ]
 dependencies = [
+  # zstd, for what a run sends (`dlboard._content_encoding`): in the standard library from Python 3.14.
+  "backports.zstd>=1.0; python_version < '3.14'",
   "coolname>=5.0.0",
   "dltype>=0.16.0",
   # Deliberately loose so dlboard-client can live alongside legacy code still pinned to numpy 1.x:

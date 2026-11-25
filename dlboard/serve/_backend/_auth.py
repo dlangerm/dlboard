@@ -137,6 +137,11 @@ class RequestLimits(BaseSettings):
     fill either with one oversized upload.
     """
 
+    @property
+    def max_upload_bytes(self) -> int:
+        """`max_upload_mb`, in bytes: the most any request body may be, decompressed or not."""
+        return self.max_upload_mb * 1024 * 1024
+
 
 def add_public_route(app: Dash, rule: str, view_func: Callable[..., Any], methods: list[str]) -> None:
     """
@@ -373,7 +378,7 @@ def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> 
     provider = get_auth_provider(app)
     settings = AuthSettings()
     AUTH_SETTINGS.set(app, settings)
-    app.server.config["MAX_CONTENT_LENGTH"] = RequestLimits().max_upload_mb * 1024 * 1024
+    app.server.config["MAX_CONTENT_LENGTH"] = RequestLimits().max_upload_bytes
     if provider.verifies_identity:
         if settings.secret_key is None:
             msg = f"The {provider.display_name} auth provider needs DLBOARD_SECRET_KEY set to sign sessions"

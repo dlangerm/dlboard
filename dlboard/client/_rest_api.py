@@ -23,6 +23,7 @@ from pydantic import AnyUrl, AwareDatetime, BaseModel, FilePath, PositiveFloat, 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard import models
+from dlboard._content_encoding import ContentEncoding, compress
 from dlboard._identity import resolve_username
 from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, TraceKey, carrier, span
@@ -152,6 +153,8 @@ class ClientTLSSettings(BaseSettings):
 
 
 _LOOPBACK_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1"})
+_COMPRESS_FROM_BYTES: Final = 1024
+"""A JSON body smaller than this (a run being created, a heartbeat) is sent as it is: there is too little to gain."""
 
 
 def _is_loopback(url: str) -> bool:
@@ -226,6 +229,9 @@ class BasicDlboardAPI:
         # Given to every request, not set on the session: `requests` lets `REQUESTS_CA_BUNDLE` override a session's.
         ca_bundle = ClientTLSSettings().ca_bundle
         self._verify: str | bool = str(ca_bundle) if ca_bundle is not None else True
+        # Whether a JSON body is compressed: once `whoami` has heard the server takes zstd, before a run's shipping
+        # processes are handed a copy of this client. Plain until then, as an older server needs.
+        self._compresses = False
 
     def _send(  # noqa: PLR0913 -- the parts of a request, each optional but the method and route
         self,
@@ -247,16 +253,18 @@ class BasicDlboardAPI:
 
         `body` is sent as JSON with NaN and the infinities spelled out (`NaN`, `Infinity`), which the server reads back:
         a loss that diverged is worth recording. `requests`' own `json=` refuses them, which would leave a batch that
-        holds one failing for good.
+        holds one failing for good. It is compressed, unless it is too small to gain from it, once `whoami` has said how.
         """
         match body:
             case None:
                 data = None
             case BaseModel():
-                data = json.dumps(body.model_dump(mode="json"))
+                data = json.dumps(body.model_dump(mode="json")).encode()
             case _:
-                data = json.dumps([model.model_dump(mode="json") for model in body])
+                data = json.dumps([model.model_dump(mode="json") for model in body]).encode()
         content_type: dict[str, str] = {} if data is None else {"Content-Type": "application/json"}
+        if data is not None and self._compresses and len(data) >= _COMPRESS_FROM_BYTES:
+            data, content_type["Content-Encoding"] = compress(data), ContentEncoding.ZSTD
         request_id = uuid4().hex
         server = urlsplit(self.base_url)
         host = server.hostname or ""
@@ -308,6 +316,7 @@ class BasicDlboardAPI:
                 f"v{API_VERSION}. Install a matching `dlboard` version."
             )
             raise UnsupportedServerError(msg)
+        self._compresses = ContentEncoding.ZSTD in identity.accepted_encodings
         return identity
 
     def create_project(self, new_project: models.NewProject) -> models.Project:

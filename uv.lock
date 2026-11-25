@@ -1113,6 +1113,7 @@ provides-extras = ["otel", "otel-grpc", "postgres", "s3"]
 name = "dlboard-client"
 source = { editable = "client" }
 dependencies = [
+    { name = "backports-zstd", marker = "python_full_version < '3.14'" },
     { name = "coolname" },
     { name = "dltype" },
     { name = "numpy" },
@@ -1149,6 +1150,7 @@ system = [
 
 [package.metadata]
 requires-dist = [
+    { name = "backports-zstd", marker = "python_full_version < '3.14'", specifier = ">=1.0" },
     { name = "coolname", specifier = ">=5.0.0" },
     { name = "dltype", specifier = ">=0.16.0" },
     { name = "numpy", specifier = ">=1.26.0" },

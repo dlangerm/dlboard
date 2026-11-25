@@ -123,6 +123,10 @@ The two shipping processes are started with `multiprocessing`'s `spawn` method, 
 A script that builds the logger (or starts training) at module level, with no `if __name__ == "__main__":` guard, re-runs that code in every shipping process too — usually visible as training appearing to restart, or the logger itself being constructed more than once.
 This is the same requirement Python's own `multiprocessing` docs describe for any spawn-based code, not something specific to dlboard.
 
+**Compressed uploads.**
+What a run sends is compressed on its way to the server, as zstd: a flush of metrics is mostly the same keys over and over, and shrinks to a quarter or less.
+The client compresses only for a server that said it takes compressed bodies, so an older server still gets plain JSON; artifacts, mostly already compressed, are sent as they are.
+
 **System metrics.**
 Install `dlboard-client[system]` and a run samples the host's CPU and memory and the training process's own, every 30 seconds; add `dlboard-client[gpu]` (NVML, NVIDIA's management library) and it samples each GPU the run can use too (`CUDA_VISIBLE_DEVICES`, as CUDA numbers them: `gpu0` is `cuda:0`): utilization, memory, temperature and power.
 They are two extras because NVML is missing or unusable on plenty of machines that still have a CPU worth watching: either works without the other, and NVML that can't start only turns the GPU part off.

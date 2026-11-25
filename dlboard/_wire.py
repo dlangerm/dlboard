@@ -14,10 +14,11 @@ from __future__ import annotations
 from typing import Final, Generic, TypeVar
 
 import pendulum
-from pydantic import AwareDatetime, BaseModel, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, TypeAdapter, field_validator
 
 from dlboard import models
 from dlboard._compat import StrEnum
+from dlboard._content_encoding import ContentEncoding
 
 _Item = TypeVar("_Item")
 """Pre-3.12 `TypeVar` style (the client's floor is 3.10): what a `Page` holds."""
@@ -184,6 +185,9 @@ class ArtifactInfo(BaseModel, frozen=True, extra="ignore"):
     tags: dict[str, models.TagValue] = {}
 
 
+_NAMES: Final = TypeAdapter(tuple[str, ...])
+
+
 class Identity(BaseModel, frozen=True, extra="ignore"):
     """Who the server authenticated a request as, plus enough to let a client self-diagnose -- what `whoami` returns."""
 
@@ -196,6 +200,17 @@ class Identity(BaseModel, frozen=True, extra="ignore"):
     proceed rather than guess -- see `DLBoardLogger.__init__`."""
     run_id: int | None = None
     """The one run the request's run token logs to, or `None` for any other credential (and from an older server)."""
+    accepted_encodings: tuple[ContentEncoding, ...] = ()
+    """The `Content-Encoding`s this server takes a request body in that this client knows; none from an older server."""
+
+    @field_validator("accepted_encodings", mode="before")
+    @classmethod
+    def _known(
+        cls,
+        value: object,  # dlboard-ignore[forbid-string-ignore] -- the raw input
+    ) -> tuple[str, ...]:
+        """A newer server may list an encoding this client doesn't know, which it then just doesn't use."""
+        return tuple(name for name in _NAMES.validate_python(value) if name in set(ContentEncoding))
 
 
 class RunToken(BaseModel, frozen=True, extra="ignore"):
