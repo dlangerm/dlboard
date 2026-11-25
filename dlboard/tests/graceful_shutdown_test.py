@@ -6,7 +6,6 @@ import io
 from typing import TYPE_CHECKING
 
 import pytest
-from dash import get_app
 
 from dlboard.conftest import dispose_stores
 from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
@@ -14,6 +13,7 @@ from dlboard.plugins.data_stores import filesystem, sqlite
 from dlboard.plugins.data_stores._blob_store import BlobArtifactStore
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_artifact_store
+from dlboard.serve._backend._app_slot import DASH_APP_EXTENSION
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -32,7 +32,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[FlaskCli
 
 
 def test_upload_is_a_503_with_retry_after_when_the_write_worker_has_died(client: FlaskClient) -> None:
-    store = get_system_artifact_store(get_app())
+    # This client's own app, not Dash's `get_app()`: that is whichever app in the process served first, another test's.
+    store = get_system_artifact_store(client.application.extensions[DASH_APP_EXTENSION])
     assert isinstance(store, BlobArtifactStore)
     store.dispose()
 
