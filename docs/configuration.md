@@ -144,6 +144,11 @@ See [auth.md](plugins/auth.md).
 | `DLBOARD_SECURE_COOKIES` | `true` | Send the session cookie over HTTPS only. Turn off only for plain-HTTP local testing. |
 | `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames granted admin whenever they sign in. How the first admin is made. |
 | `DLBOARD_ADMIN_GROUPS` | none | Comma-separated identity-provider groups whose members are admins. |
+| `DLBOARD_TRUSTED_HEADER_ISSUER` | required by `TRUSTED_HEADER_AUTH` | A stable name for the identity source behind the proxy (`sso.example.com`). A user is known by it and the user header together. |
+| `DLBOARD_TRUSTED_HEADER_PROXIES` | required by `TRUSTED_HEADER_AUTH` | Comma-separated addresses or networks (`10.0.0.5`, `172.18.0.0/16`) of the proxy: the only peers whose identity headers are believed, by the connection's own address. |
+| `DLBOARD_TRUSTED_HEADER_USER` | `X-Forwarded-User` | The header with the caller's stable id, which is also their username. |
+| `DLBOARD_TRUSTED_HEADER_EMAIL` | `X-Forwarded-Email` | The header with their email. |
+| `DLBOARD_TRUSTED_HEADER_GROUPS` | `X-Forwarded-Groups` | The header with their comma-separated groups, matched against group grants and `DLBOARD_ADMIN_GROUPS`. |
 | `DLBOARD_NEW_PROJECT_ACCESS` | none (private) | The role (`viewer`, `editor`, `owner`) everyone gets on a newly created project. |
 | `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | Who may create an account: `admin_creates`, `approval` (signs up disabled until an admin enables it) or `open`. |
 | `DLBOARD_PASSWORD_MIN_LENGTH` | `12` | Minimum password length. |
