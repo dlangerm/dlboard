@@ -129,7 +129,7 @@ For production deployments:
   ```
 
   See [docs/plugins/overview.md](docs/plugins/overview.md) for the plugin protocol.
-- **Multi-user with auth** — Swap in `dlboard.plugins.PASSWORD_AUTH` for user sign-in and API tokens.
+- **Multi-user with auth** — Swap in `dlboard.plugins.PASSWORD_AUTH` for user sign-in and API tokens, or `TRUSTED_HEADER_AUTH` to let a proxy that signs people in (oauth2-proxy, Pomerium, ...) say who they are.
   See [docs/plugins/auth.md](docs/plugins/auth.md).
 
 ## Development

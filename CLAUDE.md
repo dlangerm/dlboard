@@ -92,7 +92,7 @@ Lives under `client/`, not `plugins/`, so a client install never needs the serve
 - `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker, trash_retention, lost_runs, retention]` — for a shared deployment, composed into a `dlboard serve custom --plugins` list; configured by `DLBOARD_POSTGRES_*` env vars (`PostgresSettings`)
 - `POSTGRES_S3_STORAGE` = `[postgres, s3, artifact_purge_worker, trash_retention, lost_runs, retention]` — same, but artifacts go to any S3-protocol object store (AWS, MinIO, VAST, ...) instead of local disk; configured by `DLBOARD_S3_*` env vars (`S3Settings`).
   `filesystem` and `s3` are both just a `BlobBackend` (`plugins/data_stores/_blob_store.py`) plugged into the shared `BlobArtifactStore` -- see `docs/plugins/storage.md` for the pattern and `S3Settings`'s full env var list.
-- `LOCAL_AUTH` = `[anonymous]` (no sign-in, access control off); `PASSWORD_AUTH` = `[password]` -- swap it in for a deployment where people sign in (needs `DLBOARD_SECRET_KEY`; see `docs/plugins/auth.md`)
+- `LOCAL_AUTH` = `[anonymous]` (no sign-in, access control off); `PASSWORD_AUTH` = `[password]` -- swap it in for a deployment where people sign in (needs `DLBOARD_SECRET_KEY`; see `docs/plugins/auth.md`); `TRUSTED_HEADER_AUTH` = `[trusted_header]` -- a proxy that signs people in names them in headers, believed from `DLBOARD_TRUSTED_HEADER_PROXIES` alone
 
 New functionality (a new chart type, storage backend, or artifact kind) is added by writing a new plugin module and including it in the list passed to `app()`, not by editing the core app.
 The core app should expose minimal `Store` hooks for these plugins to use, but any opinionated design choices should rest with them.

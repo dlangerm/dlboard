@@ -2,7 +2,7 @@
 
 from dlboard.models import PluginProtocol
 from dlboard.plugins import auth, backend, charts, retention, themes
-from dlboard.plugins.auth import anonymous, password
+from dlboard.plugins.auth import anonymous, password, trusted_header
 from dlboard.plugins.backend import (
     artifact_purge_worker,
     basic_rest_backend,
@@ -45,6 +45,9 @@ LOCAL_AUTH: list[PluginProtocol] = [anonymous]
 # `dlboard serve custom --plugins` list. Needs `DLBOARD_SECRET_KEY` -- see `password.PasswordSettings`
 # and `dlboard.serve.AuthSettings`.
 PASSWORD_AUTH: list[PluginProtocol] = [password]
+# Sign-in by a reverse proxy that already authenticated the caller (oauth2-proxy, Pomerium, ...): believes the identity
+# headers it sets, from it alone. Needs `DLBOARD_TRUSTED_HEADER_ISSUER`, `_PROXIES` and `DLBOARD_SECRET_KEY`.
+TRUSTED_HEADER_AUTH: list[PluginProtocol] = [trusted_header]
 BUILTIN_BACKEND: list[PluginProtocol] = [basic_rest_backend, error]
 BUILTIN_CHARTS: list[PluginProtocol] = [
     charts.image_series,
@@ -88,6 +91,7 @@ __all__ = [
     "PASSWORD_AUTH",
     "POSTGRES_S3_STORAGE",
     "POSTGRES_STORAGE",
+    "TRUSTED_HEADER_AUTH",
     "auth",
     "backend",
     "charts",

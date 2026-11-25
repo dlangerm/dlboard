@@ -61,7 +61,7 @@ from dlboard.serve._pages._page_sections import (
 )
 from dlboard.serve._production_server import resolve_plugins, run_production_server
 from dlboard.serve._series import SeriesDash, series_color, series_dash, series_swatch_class
-from dlboard.serve._settings_env import set_setting_env
+from dlboard.serve._settings_env import CommaSeparated, comma_items, set_setting_env
 from dlboard.serve._startup import Dependency, wait_for
 from dlboard.serve._url import relative_path
 from dlboard.serve.app import app
@@ -73,6 +73,7 @@ __all__ = [
     "AuthSettings",
     "AuthorizingDataStore",
     "ClientsideScript",
+    "CommaSeparated",
     "Dependency",
     "ExperimentSection",
     "ExperimentSlot",
@@ -96,6 +97,7 @@ __all__ = [
     "allow_run_tokens",
     "app",
     "build_artifacts_dataframe",
+    "comma_items",
     "end_session",
     "find_run_scope",
     "get_artifact_store",

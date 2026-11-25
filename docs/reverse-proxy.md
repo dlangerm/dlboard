@@ -64,6 +64,22 @@ server {
 
 `$remote_addr` (not `$proxy_add_x_forwarded_for`) makes nginx *replace* any `X-Forwarded-For` a client sent, which is what `DLBOARD_TRUSTED_PROXIES=1` assumes.
 
+## Signing in at the proxy
+
+A proxy that signs people in against your identity provider can tell dlboard who they are, with `TRUSTED_HEADER_AUTH` ([auth.md](plugins/auth.md#behind-an-authenticating-proxy-trusted_header_auth)).
+With oauth2-proxy on the same host, in front of dlboard:
+
+```bash
+oauth2-proxy --provider=oidc --oidc-issuer-url=https://sso.example.com \
+  --client-id=dlboard --client-secret=... --cookie-secret=... --email-domain='*' \
+  --upstream=http://127.0.0.1:8050 --pass-user-headers
+
+DLBOARD_TRUSTED_HEADER_ISSUER=sso.example.com DLBOARD_TRUSTED_HEADER_PROXIES=127.0.0.1 \
+  dlboard serve custom --plugins mydeployment:PLUGINS
+```
+
+dlboard believes the headers from `DLBOARD_TRUSTED_HEADER_PROXIES` alone, so keep it listening where only the proxy reaches it.
+
 ## Under a path
 
 To serve at `https://example.com/dlboard/` instead of a subdomain, set `DLBOARD_URL_PREFIX=dlboard` and forward the whole path **without stripping the prefix**:

@@ -16,12 +16,13 @@ Built-in providers:
 - `anonymous` (`LOCAL_AUTH`, what `dlboard serve local` uses) — nobody signs in.
   A request is attributed to a best-effort name (the client's `X-Dlboard-User` header, `DLBOARD_USER`, or the OS login), which nothing proves, so access control stays off: everyone can see and edit everything, like `tensorboard`.
 - `password` (`PASSWORD_AUTH`) — username/password accounts, for hosting dlboard for other people without an identity provider.
+- `trusted_header` (`TRUSTED_HEADER_AUTH`) — a reverse proxy that already signed the caller in (oauth2-proxy, Pomerium, Authelia, ...) says who they are in headers.
 
 ## When you'd need this
 
 - You're hosting dlboard for more than yourself, and people should only see their own (or their team's) projects: deploy with `PASSWORD_AUTH` (below).
-- Your organization already has an identity provider (Okta, Entra ID, Google, Keycloak, ...): write a provider for it (below).
-  An OIDC provider and a "trusted reverse-proxy header" provider (for oauth2-proxy, Pomerium, an AWS ALB, Cloudflare Access) are the planned next built-ins; the pieces they need (`Principal.groups`, group grants, `DLBOARD_ADMIN_GROUPS`) are already in place.
+- Your organization already has an identity provider (Okta, Entra ID, Google, Keycloak, ...): put an authenticating proxy in front and deploy with `TRUSTED_HEADER_AUTH` (below), or write a provider for it.
+  An OIDC provider is the planned next built-in; the pieces it needs (`Principal.groups`, group grants, `DLBOARD_ADMIN_GROUPS`) are already in place.
 
 ## How it works
 
@@ -123,6 +124,31 @@ The rest happens in the app:
   They can also disable users and grant admin there.
 - Project owners share a project from its page's Sharing tab.
 - Everyone creates API tokens for their training scripts (the home page offers a newcomer their first in one click, and the Account page makes more), then sets `DLBOARD_API_KEY` wherever `DLBoardLogger` runs (see [client.md](../client.md)).
+
+## Behind an authenticating proxy (`TRUSTED_HEADER_AUTH`)
+
+When a reverse proxy in front already signs people in against your identity provider, dlboard can believe the headers it forwards:
+
+```python
+# mydeployment.py
+from dlboard.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, POSTGRES_STORAGE, TRUSTED_HEADER_AUTH, themes
+
+PLUGINS = [*POSTGRES_STORAGE, *TRUSTED_HEADER_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
+```
+
+It needs `DLBOARD_TRUSTED_HEADER_ISSUER`, a stable name for the identity source, and `DLBOARD_TRUSTED_HEADER_PROXIES`, the proxy's addresses; the headers it reads are settings too (see [Configuration](../configuration.md#authentication)).
+Their defaults are what oauth2-proxy sends with `--pass-user-headers`.
+Authelia sends `Remote-User`, `Remote-Email` and `Remote-Groups`; Pomerium sends what its `jwt_claims_headers` names.
+`DLBOARD_SECRET_KEY` is needed as for any provider that verifies identity.
+
+- **The headers are believed from the proxy alone.**
+  `DLBOARD_TRUSTED_HEADER_PROXIES` is checked against the connection's own address, never against `X-Forwarded-For`, which a client can write.
+  A request from anywhere else that carries one of the headers gets a 403, so a network that lets someone reach dlboard around the proxy shows up at once.
+  The proxy must also overwrite these headers on every request it forwards, never pass along ones the client sent (oauth2-proxy and Pomerium do).
+- **A training script signs in with an API token, not the proxy.**
+  A token works from anywhere, so a script can talk to dlboard directly or through the proxy, if the proxy lets bearer tokens through.
+- **Signing out is the proxy's to do:** the headers sign a browser in again on its next request.
+- An AWS ALB's or Cloudflare Access's signed assertion (`x-amzn-oidc-data`, `Cf-Access-Jwt-Assertion`) is not checked: put oauth2-proxy (or another proxy that forwards plain headers) behind them, or wait for the OIDC provider.
 
 ## How do I build a provider
 
