@@ -15,6 +15,7 @@ import requests
 from pydantic import SecretStr
 
 from dlboard import models
+from dlboard._content_encoding import ContentEncoding, decode, encodable
 from dlboard._wire import Resource
 from dlboard.client import _rest_api as backend
 
@@ -273,3 +274,47 @@ def test_an_artifact_that_takes_the_overlay_key_suffix_but_cannot_be_a_layer_is_
         api.log_artifact_batch([(artifact, Path(artifact.fname))])
 
     assert [artifact.key in str(w.message) for w in caught] == ([True] if warned else [])
+
+
+@pytest.mark.parametrize(
+    ("accepted", "sent_as"),
+    [
+        pytest.param(["zstd", "gzip"], encodable()[0], id="the-best-both-have"),
+        pytest.param(["gzip"], ContentEncoding.GZIP, id="the-one-the-server-takes"),
+        pytest.param(["br"], None, id="none-this-client-has"),
+        pytest.param(None, None, id="an-older-server-that-lists-none"),
+    ],
+)
+def test_a_metric_batch_is_compressed_only_the_way_the_server_said_it_takes(
+    monkeypatch: pytest.MonkeyPatch, accepted: list[str] | None, sent_as: ContentEncoding | None
+) -> None:
+    """#799: a client never sends an encoding the server didn't list in `whoami`, and a small body is sent as it is."""
+    api = backend.BasicDlboardAPI(base_url="http://host:1")
+    sent: list[dict[str, Any]] = []
+    identity = {"id": 1, "username": "me", "server_version": "0", "api_version": backend.API_VERSION}
+
+    def _request(_method: str, url: str, **kwargs: Any) -> _Reply:  # noqa: ANN401
+        sent.append(kwargs)
+        listed: dict[str, list[str]] = {} if accepted is None else {"accepted_encodings": accepted}
+        return _Reply(200, body={**identity, **listed} if url.endswith(backend.WHOAMI_PATH) else {"ok": True})
+
+    monkeypatch.setattr(api._session, "request", _request)
+    batch = [
+        models.LoggedMetrics(
+            experiment_id=1,
+            run_id=2,
+            step=step,
+            metrics={"train/loss": 1 / (step + 1)},
+            timestamp_utc=pendulum.now("UTC"),
+        )
+        for step in range(50)
+    ]
+    api.whoami()
+    api.log_metric_batch(batch)
+    api.heartbeat(2)
+
+    big, small = sent[-2], sent[-1]
+    assert big["headers"].get("Content-Encoding") == sent_as
+    plain = big["data"] if sent_as is None else decode(big["data"], sent_as, limit=10**7)
+    assert json.loads(plain) == [m.model_dump(mode="json") for m in batch]
+    assert "Content-Encoding" not in small["headers"]

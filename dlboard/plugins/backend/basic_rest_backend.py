@@ -13,6 +13,7 @@ from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import NotFound
 
 from dlboard import models
+from dlboard._content_encoding import ContentEncoding
 from dlboard._telemetry import Attributes, attribute
 from dlboard._version import __version__
 from dlboard._wire import (
@@ -243,7 +244,12 @@ def whoami() -> dict[str, Any]:
     """Who this request was authenticated as, plus this server's version -- the client's handshake."""
     user = get_current_user()
     return Identity(
-        id=user.id, username=user.username, server_version=__version__, run_id=find_run_scope()
+        id=user.id,
+        username=user.username,
+        server_version=__version__,
+        run_id=find_run_scope(),
+        # Every app takes them: `dlboard.serve._backend._compression`.
+        accepted_encodings=tuple(ContentEncoding),
     ).model_dump(mode="json")
 
 

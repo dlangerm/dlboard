@@ -196,6 +196,12 @@ class Identity(BaseModel, frozen=True, extra="ignore"):
     proceed rather than guess -- see `DLBoardLogger.__init__`."""
     run_id: int | None = None
     """The one run the request's run token logs to, or `None` for any other credential (and from an older server)."""
+    accepted_encodings: tuple[str, ...] = ()
+    """
+    The `Content-Encoding`s this server takes a request body in (`ContentEncoding`'s values), or none from an older server.
+
+    Names, not `ContentEncoding`s: a newer server may list one this client doesn't know, which it then just doesn't use.
+    """
 
 
 class RunToken(BaseModel, frozen=True, extra="ignore"):

@@ -1146,9 +1146,13 @@ system = [
     { name = "opentelemetry-sdk" },
     { name = "psutil" },
 ]
+zstd = [
+    { name = "backports-zstd", marker = "python_full_version < '3.14'" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "backports-zstd", marker = "python_full_version < '3.14' and extra == 'zstd'", specifier = ">=1.0" },
     { name = "coolname", specifier = ">=5.0.0" },
     { name = "dltype", specifier = ">=0.16.0" },
     { name = "numpy", specifier = ">=1.26.0" },
@@ -1170,7 +1174,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=23.1.0" },
     { name = "typing-extensions", specifier = ">=4.5.0" },
 ]
-provides-extras = ["gpu", "lightning", "otel", "otel-grpc", "system"]
+provides-extras = ["gpu", "lightning", "otel", "otel-grpc", "system", "zstd"]
 
 [[package]]
 name = "dltype"

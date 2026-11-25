@@ -92,6 +92,8 @@ system = [
   "opentelemetry-sdk>=1.16",
   "psutil>=5.9"
 ]
+# Compress what a run sends as zstd rather than gzip (smaller, and quicker to make): built into Python from 3.14.
+zstd = ["backports.zstd>=1.0; python_version < '3.14'"]
 
 [project.urls]
 Changelog = "https://github.com/dlangerm/dlboard/blob/main/CHANGELOG.md"
