@@ -73,6 +73,18 @@ Every server sharing a database starts one, and they share the work through the 
 | `DLBOARD_TRASH_RETENTION_DAYS` | `30` | How long anything stays in the Trash, restorable, before it is purged for good, whoever deleted it. Counted from no earlier than the first time the server checks, so what was in the Trash before an upgrade is not purged the moment it lands. |
 | `DLBOARD_LOST_RUN_AFTER_S` | `600` | How long a running run may go unheard from -- no batch, no heartbeat -- before it is given up as lost: *unknown*, ended when it was last heard from. At least 180. Heard from again, it runs again. See [client.md](client.md). |
 
+## Webhooks
+
+Posting each run that ends to its project's webhooks: see [webhooks.md](webhooks.md).
+
+| Variable | Default | |
+| --- | --- | --- |
+| `DLBOARD_WEBHOOK_ALLOWED_HOSTS` | none | Comma-separated hosts a webhook may post to though they resolve to an address that isn't public (this machine, a private network, a tailnet): an internal chat server, say. |
+| `DLBOARD_WEBHOOK_MAX_PER_PROJECT` | `10` | The most webhooks a project has. |
+| `DLBOARD_WEBHOOK_TIMEOUT_S` | `5` | How long a post waits to connect, and then for the answer. |
+| `DLBOARD_WEBHOOK_ATTEMPTS` | `10` | Tries a post gets, a minute apart and doubling, before its webhook is turned off: about eight and a half hours. |
+| `DLBOARD_WEBHOOK_INTERVAL_S` | `30` | How often the server looks for runs that ended. |
+
 ## Retention
 
 The retention plugin deletes a project's oldest runs (to the Trash) once they pass its rule: the newest N runs, or the runs of the last N days.

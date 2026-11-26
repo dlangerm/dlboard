@@ -93,6 +93,16 @@ class Run(NewRun, frozen=True, extra="ignore"):
     its node lost. Cleared, and the run running again, the moment it is heard from once more.
     """
 
+    done_at: AwareDatetime | None = None
+    """
+    When the server recorded how the run ended, by its own clock: its client reporting a status it didn't have
+    (`finish_run`), or its being given up as lost.
+
+    Unlike `ended_at` (a client's word, or when a lost run was last seen, either of which may be long past), it only moves
+    forward, so what ended since a moment is found by it (`DataStore.runs_done_since`). `None` while the run is running,
+    and for a run that ended before it was kept.
+    """
+
     kept_at: AwareDatetime | None = None
     """
     When this run was kept, if it is: no retention rule deletes a kept run, and only an owner of its project deletes it.

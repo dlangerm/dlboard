@@ -11,6 +11,31 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Webhooks: hear when a run ends, without keeping its page open.**
+  A project's owners add webhooks on its new **Webhooks** tab, each for the ways a run ends it cares about (finished, failed, crashed); the server posts each run that ends there as signed JSON, whose `text` a Slack incoming webhook takes as it is.
+  Posts are retried for hours, and a webhook that keeps failing is turned off, saying why.
+  The server only posts to public addresses unless an admin allows a host (`DLBOARD_WEBHOOK_ALLOWED_HOSTS`); see [docs/webhooks.md](docs/webhooks.md).
+* **dlboard serves HTTPS itself, with no reverse proxy.**
+  Point `DLBOARD_SSL_CERTIFICATE` and `DLBOARD_SSL_KEYFILE` at a certificate and its key (from `tailscale cert`, Let's Encrypt or your own CA) and the server answers HTTPS only, HTTP/2 to a browser that offers it; send it `SIGHUP` to serve a renewed certificate.
+  A training script trusts a self-signed or private-CA certificate through `DLBOARD_CA_BUNDLE`.
+* **Sign-in by the proxy in front.**
+  `TRUSTED_HEADER_AUTH` lets a reverse proxy that already signs people in (oauth2-proxy, Pomerium, Authelia, ...) say who they are in headers, believed from the proxy's own address (`DLBOARD_TRUSTED_HEADER_PROXIES`) alone.
+
+### Changed
+
+* **Pages and chart data download in about a fifth of the bytes.**
+  The server compresses what it sends as zstd, Brotli or gzip, whichever the browser takes: a page of seven charts of eight long runs went from 5.7 MB to 1.1 MB.
+  A browser on the same machine gets it uncompressed, where compressing would only cost time; `DLBOARD_COMPRESS_RESPONSES=false` turns it off behind a proxy that compresses already.
+* **A training script sends a quarter of the bytes.**
+  What a run uploads is compressed, as zstd on Python 3.14 or with the new `dlboard-client[zstd]` extra, and gzip otherwise, to a server that says it takes it; an older server still gets plain JSON.
+
+### Fixed
+
+* **A server killed outright no longer leaves its custodian running.**
+  A server killed while it read its custodian's heartbeat left the custodian waiting on it for good, still holding the database.
+
 ## [0.20.3] - 2026-11-24
 
 ### Added

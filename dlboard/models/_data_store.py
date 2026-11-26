@@ -425,6 +425,14 @@ class DataStore(typing.Protocol[_P]):
         """Give up as lost (`UNKNOWN`, `lost_at`) at most `limit` running runs not heard from since `quiet_since`."""
         ...
 
+    def runs_done_since(self, after: tuple[datetime, int] | None, *, limit: int) -> list[models.Run]:
+        """
+        Up to `limit` runs of every project that ended after `after`, a `(done_at, id)` (`None`: from the first), earliest first.
+
+        What a task that acts on runs ending reads, a page at a time from where it left off (`Run.done_at`).
+        """
+        ...
+
     def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
         """Record what produced a run, once: the run's first context is kept, and returned again to a later call."""
         ...

@@ -1,7 +1,7 @@
 """All built-in dlboard plugins."""
 
 from dlboard.models import PluginProtocol
-from dlboard.plugins import auth, backend, charts, retention, themes
+from dlboard.plugins import auth, backend, charts, retention, themes, webhooks
 from dlboard.plugins.auth import anonymous, password, trusted_header
 from dlboard.plugins.backend import (
     artifact_purge_worker,
@@ -19,6 +19,7 @@ LOCAL_STORAGE: list[PluginProtocol] = [
     trash_retention,
     lost_runs,
     retention,
+    webhooks,
 ]
 # Postgres metadata (configured from `DLBOARD_POSTGRES_*` env vars -- see `postgres.PostgresSettings`) with
 # the same on-disk artifact store; compose it into a `dlboard serve custom --plugins` list.
@@ -29,6 +30,7 @@ POSTGRES_STORAGE: list[PluginProtocol] = [
     trash_retention,
     lost_runs,
     retention,
+    webhooks,
 ]
 # Postgres metadata with an S3-protocol artifact store (configured from `DLBOARD_S3_*` env vars -- see
 # `s3.S3Settings`) instead of local disk; needs the `s3` extra (`pip install 'dlboard[s3]'`).
@@ -39,6 +41,7 @@ POSTGRES_S3_STORAGE: list[PluginProtocol] = [
     trash_retention,
     lost_runs,
     retention,
+    webhooks,
 ]
 LOCAL_AUTH: list[PluginProtocol] = [anonymous]
 # Username/password sign-in, for hosting dlboard for other people: swap it in for `LOCAL_AUTH` in a
@@ -101,4 +104,5 @@ __all__ = [
     "s3",
     "sqlite",
     "themes",
+    "webhooks",
 ]

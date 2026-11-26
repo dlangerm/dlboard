@@ -25,6 +25,7 @@ Day-to-day use and upkeep.
 
 - [Runs, pins & comparisons](comparisons.md) — the run list, flagging the runs that matter, and comparing runs of several experiments.
 - [Retention](retention.md) — how many runs, or how old, a project keeps, kept runs, and when the Trash is emptied.
+- [Webhooks](webhooks.md) — post to Slack, CI or a bot when a run ends, signed.
 - [Background tasks](background-tasks.md) — the custodian process, running several servers, watching it, and writing a task.
 - [Telemetry](telemetry.md) — Prometheus and OpenTelemetry metrics and logs, for Grafana, Mimir and Loki.
 - [Grafana dashboards](grafana/README.md) — the dashboards dlboard ships for its metrics, traces and logs.
