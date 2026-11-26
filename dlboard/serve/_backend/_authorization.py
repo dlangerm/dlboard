@@ -568,10 +568,12 @@ class AuthorizingDataStore(models.DataStore[[]]):
         require_scope(self._actor, Scope.ALL)
         return self._inner.mark_lost_runs(quiet_since, limit=limit)
 
-    def runs_done_since(self, after: tuple[datetime, int] | None, *, limit: int) -> list[models.Run]:
+    def runs_done_since(
+        self, after: tuple[datetime, int] | None, *, before: datetime, limit: int
+    ) -> list[models.Run]:
         # Every project's: for a custodian's task, which no user is behind.
         require_scope(self._actor, Scope.ALL)
-        return self._inner.runs_done_since(after, limit=limit)
+        return self._inner.runs_done_since(after, before=before, limit=limit)
 
     def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
         self.require_run_write(context.run_id, context.experiment_id)
@@ -1025,13 +1027,15 @@ class AuthorizingDataStore(models.DataStore[[]]):
             if readable(project_id)
         }
 
-    def put_scoped_setting(
+    def put_scoped_setting(  # noqa: PLR0913 -- the scope, the value, who writes it, and what it replaces
         self,
         key: str,
         project_id: int,
         experiment_id: int | None,
         value: dict[str, Any] | None,
         actor: models.User,
+        *,
+        expected: models.ScopedSetting | models.Overwrite | None = models.Overwrite.ANYTHING,
     ) -> models.ScopedSetting | None:
         rule = self._setting_rule(key)
         self._require_role_or_admin(
@@ -1051,7 +1055,9 @@ class AuthorizingDataStore(models.DataStore[[]]):
                 )
             )
         self._settings.pop((key, project_id), None)  # what this request reads next is what it wrote
-        return self._inner.put_scoped_setting(key, project_id, experiment_id, value, self._bound(actor))
+        return self._inner.put_scoped_setting(
+            key, project_id, experiment_id, value, self._bound(actor), expected=expected
+        )
 
     # -- Soft-delete, restore, purge ------------------------------------------------------------------
     #

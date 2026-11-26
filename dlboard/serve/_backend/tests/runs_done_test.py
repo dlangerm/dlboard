@@ -19,10 +19,14 @@ def store_backend(request: pytest.FixtureRequest) -> StoreBackend:
     return request.param
 
 
+_LATER = pendulum.now("UTC").add(years=1)
+"""A `before` no run of a test reaches."""
+
+
 def _page_through(store: SQLStoreBase[Any], *, limit: int) -> list[int]:
     found: list[int] = []
     after = None
-    while page := store.runs_done_since(after, limit=limit):
+    while page := store.runs_done_since(after, before=_LATER, limit=limit):
         found += [run.id for run in page]
         last = page[-1]
         assert last.done_at is not None
@@ -64,10 +68,20 @@ def test_a_lost_run_ended_when_it_was_given_up_and_runs_again_when_it_is_heard_f
     before = pendulum.now("UTC")
     store.mark_lost_runs(pendulum.now("UTC").add(seconds=1), limit=10)
 
-    (lost,) = store.runs_done_since(None, limit=10)
+    (lost,) = store.runs_done_since(None, before=_LATER, limit=10)
     assert lost.id == run_id
     assert lost.done_at is not None
     assert lost.done_at >= before
 
     store.heartbeat(run_id)
-    assert store.runs_done_since(None, limit=10) == []
+    assert store.runs_done_since(None, before=_LATER, limit=10) == []
+
+
+def test_a_run_that_ended_at_or_after_before_is_left_for_a_later_read(
+    store: SQLStoreBase[Any], experiment_id: int
+) -> None:
+    run_id = store.create_run(models.NewRun(experiment_id=experiment_id)).id
+    earlier = pendulum.now("UTC")
+    store.finish_run(run_id, models.RunStatus.FINISHED, pendulum.now("UTC"))
+    assert store.runs_done_since(None, before=earlier, limit=10) == []
+    assert [r.id for r in store.runs_done_since(None, before=_LATER, limit=10)] == [run_id]

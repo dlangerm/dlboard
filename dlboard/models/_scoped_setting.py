@@ -7,10 +7,21 @@ knows nothing of what is in them, so a plugin keeps whatever shape of setting it
 
 from __future__ import annotations
 
+from enum import Enum, auto
 from typing import Any
 
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
+
+
+class Overwrite(Enum):
+    """`put_scoped_setting`'s `expected` when a write replaces whatever the scope holds, unread: the last write wins."""
+
+    ANYTHING = auto()
+
+
+class SettingConflictError(ValueError):
+    """A write that expected the scope to hold what it read, made after someone else changed it: read it again."""
 
 
 class NewScopedSetting(BaseModel, frozen=True, extra="forbid"):

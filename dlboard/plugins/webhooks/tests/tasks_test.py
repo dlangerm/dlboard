@@ -1,14 +1,14 @@
 """
 Webhooks' tasks, end to end against a real receiver: a run that ends is posted, signed, once, to each webhook that asks
-for how it ended; a webhook whose deliveries keep failing is turned off.
+for how it ended, as it was when it ended; a webhook whose deliveries keep failing, or whose receiver is gone, is turned
+off; a post the receiver refuses is dropped.
 """
 
 from __future__ import annotations
 
-import hashlib
 import hmac
-import json
 import threading
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -24,16 +24,20 @@ from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dlboard.plugins import webhooks as webhooks_plugin
 from dlboard.plugins.data_stores import filesystem, sqlite
 from dlboard.plugins.webhooks._hooks import (
+    DELIVERY_HEADER,
     EVENT_HEADER,
     SIGNATURE_HEADER,
     ProjectWebhooks,
+    Signature,
     Webhook,
     WebhookEvent,
     WebhookKey,
+    WebhookPayload,
 )
-from dlboard.plugins.webhooks._tasks import WebhookTask
+from dlboard.plugins.webhooks._tasks import WebhookTask, WebhookWork
 from dlboard.serve import SQLStoreBase, get_system_data_store
 from dlboard.serve import app as build_app
+from dlboard.serve._custodian import get_system_task_store
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -71,6 +75,12 @@ def receiver(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Receiver]:
     server.server_close()
 
 
+@pytest.fixture(autouse=True)
+def settled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every end settled as soon as it is made: a test doesn't wait out `RUN_END_SETTLES`, except the one about it."""
+    monkeypatch.setattr(models, "RUN_END_SETTLES", pendulum.duration())
+
+
 @pytest.fixture
 def app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Dash]:
     monkeypatch.setenv("DLBOARD_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
@@ -101,10 +111,17 @@ def _hook(url: str, *events: WebhookEvent) -> Webhook:
     return Webhook(
         url=HttpUrl(url),
         events=frozenset(events),
-        link_base="https://dlboard.example",
+        link_base=HttpUrl("https://dlboard.example/"),
         created_by=1,
         created_at=pendulum.now("UTC").subtract(minutes=1),
     )
+
+
+def _stored_hook(store: SQLStoreBase[Any], project_id: int) -> Webhook:
+    found = store.get_scoped_settings(WebhookKey.HOOKS, project_id).project
+    assert found is not None
+    (hook,) = ProjectWebhooks.model_validate(found.value).hooks
+    return hook
 
 
 def _announce(app: Dash) -> None:
@@ -127,46 +144,94 @@ def test_a_run_that_ends_is_posted_signed_once_to_each_webhook_that_asks_for_how
     _announce(app)
 
     ((headers, body),) = receiver.received
-    timestamp, signature = (part.split("=", 1)[1] for part in headers[SIGNATURE_HEADER].split(","))
-    expected = hmac.new(asks.secret.encode(), f"{timestamp}.".encode() + body, hashlib.sha256).hexdigest()
-    assert hmac.compare_digest(signature, expected)
+    signed = Signature.parse(headers[SIGNATURE_HEADER])
+    assert hmac.compare_digest(signed.digest, Signature.of(asks.secret, body, signed.at).digest)
     assert headers[EVENT_HEADER] == WebhookEvent.FINISHED
-    posted = json.loads(body)
-    assert posted["run"]["id"] == finished.id
-    assert (posted["project"]["id"], posted["experiment"]["name"]) == (project_id, "sweep")
-    assert posted["url"] == f"https://dlboard.example/experiment/{experiment_id}?run={finished.id}"
-    assert posted["text"].startswith("lr-3e-4 finished")
+    assert uuid.UUID(headers[DELIVERY_HEADER])
+    posted = WebhookPayload.model_validate_json(body)
+    assert posted.run.id == finished.id
+    assert (posted.project.id, posted.experiment.name) == (project_id, "sweep")
+    assert str(posted.url) == f"https://dlboard.example/experiment/{experiment_id}?run={finished.id}"
+    assert posted.text.startswith("lr-3e-4 finished")
 
 
-def test_a_run_given_up_as_lost_is_posted_as_crashed(
+def test_a_run_given_up_as_lost_is_posted_as_crashed_though_it_was_heard_from_before_the_post(
     app: Dash, store: SQLStoreBase[Any], receiver: _Receiver
 ) -> None:
+    """What is posted is the run as it ended, made when its end was found: not as it is by the time it is posted."""
     _, experiment_id = _with_hooks(store, _hook(receiver.url, WebhookEvent.CRASHED))
-    store.create_run(models.NewRun(experiment_id=experiment_id))
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
     store.mark_lost_runs(pendulum.now("UTC").add(seconds=1), limit=10)
+    run_task(app, WebhookTask.FIND)
+    store.heartbeat(run.id)  # running again
 
-    _announce(app)
+    run_task(app, WebhookTask.DELIVER)
 
-    ((headers, _),) = receiver.received
+    ((headers, body),) = receiver.received
     assert headers[EVENT_HEADER] == WebhookEvent.CRASHED
+    assert WebhookPayload.model_validate_json(body).run.status is models.RunStatus.UNKNOWN
 
 
-def test_a_webhook_whose_deliveries_keep_failing_is_turned_off_saying_why(
+def test_a_run_is_found_only_once_its_end_has_settled(
     app: Dash, store: SQLStoreBase[Any], receiver: _Receiver, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    receiver.status = 500
+    """One that ended within `RUN_END_SETTLES` is left for a later look, not passed over by the cursor."""
+    _, experiment_id = _with_hooks(store, _hook(receiver.url, WebhookEvent.FINISHED))
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.finish_run(run.id, models.RunStatus.FINISHED, pendulum.now("UTC"))
+    monkeypatch.setattr(models, "RUN_END_SETTLES", pendulum.duration(minutes=1))
+    _announce(app)
+    assert receiver.received == []
+
+    monkeypatch.setattr(models, "RUN_END_SETTLES", pendulum.duration())
+    _announce(app)
+    assert len(receiver.received) == 1
+
+
+@pytest.fixture
+def one_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DLBOARD_WEBHOOK_ATTEMPTS", "1")
+
+
+@pytest.mark.usefixtures("one_attempt")
+@pytest.mark.parametrize(
+    ("status", "turned_off"),
+    [
+        pytest.param(
+            500, "Turned off after 1 failed deliveries: 127.0.0.1 answered 500", id="failing-for-good"
+        ),
+        pytest.param(410, "Turned off: 127.0.0.1 answered 410", id="gone"),
+        pytest.param(400, None, id="refused-is-dropped-and-the-webhook-kept"),
+    ],
+)
+def test_what_a_failed_delivery_does_to_its_webhook(
+    app: Dash, store: SQLStoreBase[Any], receiver: _Receiver, status: int, turned_off: str | None
+) -> None:
+    """Each ends its delivery: none is left to try again."""
+    receiver.status = status
     project_id, experiment_id = _with_hooks(store, _hook(receiver.url, WebhookEvent.FAILED))
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     store.finish_run(run.id, models.RunStatus.FAILED, pendulum.now("UTC"))
 
     _announce(app)
 
-    found = store.get_scoped_settings(WebhookKey.HOOKS, project_id).project
-    assert found is not None
-    (hook,) = ProjectWebhooks.model_validate(found.value).hooks
-    assert hook.turned_off is not None
-    assert "answered 500" in hook.turned_off
+    assert _stored_hook(store, project_id).turned_off == turned_off
+    assert get_system_task_store(app).count_work(WebhookWork.DELIVERY) == 0
+
+
+def test_a_webhook_that_fails_is_posted_once_a_pass_however_many_deliveries_it_has(
+    app: Dash, store: SQLStoreBase[Any], receiver: _Receiver
+) -> None:
+    receiver.status = 503
+    _, experiment_id = _with_hooks(store, _hook(receiver.url, WebhookEvent.FINISHED))
+    for _ in range(3):
+        run = store.create_run(models.NewRun(experiment_id=experiment_id))
+        store.finish_run(run.id, models.RunStatus.FINISHED, pendulum.now("UTC"))
+
+    _announce(app)
+
+    assert len(receiver.received) == 1
+    assert get_system_task_store(app).count_work(WebhookWork.DELIVERY) == 3
 
 
 def test_a_run_that_ended_before_its_webhook_was_made_is_not_posted(

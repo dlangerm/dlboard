@@ -6,6 +6,7 @@ A webhook's secret is made by the server and shown once, as the webhook is added
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Final
 
 import dash_mantine_components as dmc
@@ -15,7 +16,7 @@ from flask import request
 from pydantic import HttpUrl, ValidationError
 
 from dlboard._compat import StrEnum
-from dlboard.models import ProjectRole, Scope, has_scope
+from dlboard.models import ProjectRole, Scope, SettingConflictError, has_scope
 from dlboard.plugins.webhooks._hooks import (
     SIGNATURE_HEADER,
     ProjectWebhooks,
@@ -25,6 +26,7 @@ from dlboard.plugins.webhooks._hooks import (
     WebhookKey,
     WebhookSettings,
     check_url,
+    link_base,
 )
 from dlboard.serve import SettingWrite, get_current_user, get_data_store, get_project_role, relative_path
 from dlboard.serve import _constants as constants
@@ -34,7 +36,7 @@ from dlboard.serve._pages._dash_helpers import CallbackStates, TriggeredId, requ
 if TYPE_CHECKING:
     from dash.development.base_component import Component
 
-    from dlboard.models import DataStore, Project
+    from dlboard.models import Project, ScopedSetting
 
 
 class _WebhooksTab:
@@ -51,12 +53,6 @@ WEBHOOKS_TAB: Final = "webhooks"
 # Pattern-matched "type" discriminator, not a standalone component id -- a plain string.
 _ACTION_TYPE: Final = "webhooks-action"
 
-_EVENT_LABELS: Final = {
-    WebhookEvent.FINISHED: "Finished",
-    WebhookEvent.FAILED: "Failed",
-    WebhookEvent.CRASHED: "Crashed",
-    WebhookEvent.ENDED: "Ended without saying how",
-}
 _DEFAULT_EVENTS: Final = [WebhookEvent.FINISHED, WebhookEvent.FAILED, WebhookEvent.CRASHED]
 
 
@@ -74,9 +70,43 @@ def _owns(project_id: int) -> bool:
     return has_scope(get_current_user(), Scope.ALL) or get_project_role(project_id) is ProjectRole.OWNER
 
 
-def _hooks(store: DataStore[...], project_id: int) -> ProjectWebhooks:
-    found = store.get_scoped_settings(WebhookKey.HOOKS, project_id).project
-    return ProjectWebhooks.model_validate(found.value) if found is not None else ProjectWebhooks()
+@dataclass(frozen=True)
+class _Stored:
+    """A project's webhooks as this request read them: what a change is made from, and saved over only if still there."""
+
+    project_id: int
+    setting: ScopedSetting | None
+
+    @classmethod
+    def read(cls, project_id: int) -> _Stored:
+        return cls(project_id, get_data_store().get_scoped_settings(WebhookKey.HOOKS, project_id).project)
+
+    @property
+    def hooks(self) -> ProjectWebhooks:
+        return (
+            ProjectWebhooks.model_validate(self.setting.value)
+            if self.setting is not None
+            else ProjectWebhooks()
+        )
+
+    def save(self, changed: ProjectWebhooks) -> str | None:
+        """Store `changed` as the project's webhooks, unless they changed since they were read; why not, if refused."""
+        try:
+            get_data_store().put_scoped_setting(
+                WebhookKey.HOOKS,
+                self.project_id,
+                None,
+                changed.model_dump(mode="json"),
+                get_current_user(),
+                expected=self.setting,
+            )
+        except PermissionError:
+            return "Only an owner of the project changes its webhooks."
+        except SettingConflictError:
+            return "This project's webhooks changed just now (another owner, or the server turning one off): try again."
+        except ValueError as refused:
+            return str(refused)
+        return None
 
 
 def _row(hook: Webhook) -> Component:
@@ -99,7 +129,7 @@ def _row(hook: Webhook) -> Component:
     return dmc.TableTr(
         [
             dmc.TableTd(dmc.Code(str(hook.url)), style={"wordBreak": "break-all"}),
-            dmc.TableTd(", ".join(_EVENT_LABELS[e] for e in WebhookEvent if e in hook.events)),
+            dmc.TableTd(", ".join(e.label for e in WebhookEvent if e in hook.events)),
             dmc.TableTd(status),
             dmc.TableTd(
                 dmc.Group(
@@ -119,7 +149,7 @@ def _row(hook: Webhook) -> Component:
 
 
 def _section(project: Project) -> Component:
-    hooks = _hooks(get_data_store(), project.id).hooks
+    hooks = _Stored.read(project.id).hooks.hooks
     table = dmc.Table(
         [
             dmc.TableThead(dmc.TableTr([dmc.TableTh(h) for h in ("Posts to", "When a run", "Status", "")])),
@@ -131,7 +161,7 @@ def _section(project: Project) -> Component:
             dmc.Text(
                 "When a run of this project ends, the server posts it as JSON to each webhook that asks for how it "
                 f"ended, signed with the webhook's secret ({SIGNATURE_HEADER}). Its `text` is all a Slack incoming "
-                "webhook needs.",
+                "webhook needs. A webhook the server turned off is sent nothing that ends until it is turned on again.",
                 size="sm",
                 c="dimmed",
             ),
@@ -141,7 +171,7 @@ def _section(project: Project) -> Component:
                     dmc.TextInput(id=URL_ID, placeholder="https://hooks.slack.com/services/...", w=380),
                     dmc.MultiSelect(
                         id=EVENTS_ID,
-                        data=[{"value": e, "label": label} for e, label in _EVENT_LABELS.items()],
+                        data=[{"value": e, "label": e.label} for e in WebhookEvent],
                         value=list(_DEFAULT_EVENTS),
                         w=320,
                     ),
@@ -181,19 +211,6 @@ def _secret_notice(hook: Webhook) -> Component:
     )
 
 
-def _save(project_id: int, hooks: ProjectWebhooks) -> str | None:
-    """Store `hooks` as the project's; why not, if it is refused."""
-    try:
-        get_data_store().put_scoped_setting(
-            WebhookKey.HOOKS, project_id, None, hooks.model_dump(mode="json"), get_current_user()
-        )
-    except PermissionError:
-        return "Only an owner of the project changes its webhooks."
-    except ValueError as refused:
-        return str(refused)
-    return None
-
-
 class _Added(CallbackStates):
     clicks: Annotated[int | None, Input(ADD_ID, "n_clicks")]
     url: Annotated[str | None, State(URL_ID, "value")]
@@ -212,15 +229,14 @@ def _add(form: _Added) -> tuple[Webhook | None, str | None]:
         return None, "That isn't a URL."
     except RefusedError as refused:
         return None, str(refused)
-    hooks = _hooks(get_data_store(), form.project_id)
+    stored = _Stored.read(form.project_id)
     hook = Webhook(
         url=url,
         events=frozenset(form.events),
-        # Where this owner reaches the server, with its URL prefix: where the links in what it posts point.
-        link_base=request.host_url.rstrip("/") + relative_path("/").rstrip("/"),
+        link_base=link_base(request.host_url, relative_path("/")),
         created_by=get_current_user().id,
     )
-    refused = _save(form.project_id, ProjectWebhooks(hooks=(*hooks.hooks, hook)))
+    refused = stored.save(ProjectWebhooks(hooks=(*stored.hooks.hooks, hook)))
     return (None, refused) if refused is not None else (hook, None)
 
 
@@ -257,7 +273,8 @@ def register_webhook_callbacks(app: Dash) -> None:
     )
     def act(_clicks: list[int | None], project_id: int) -> tuple[Any, Any, Any]:
         pressed = require_triggered_id(_ActionButton)
-        hooks = _hooks(get_data_store(), project_id)
+        stored = _Stored.read(project_id)
+        hooks = stored.hooks
         hook = hooks.find(pressed.hook)
         if hook is None:
             return _redrawn(project_id), None, None
@@ -266,7 +283,7 @@ def register_webhook_callbacks(app: Dash) -> None:
                 changed = hooks.replaced(hook.id, None)
             case _Action.TURN_ON:
                 changed = hooks.replaced(hook.id, hook.model_copy(update={"turned_off": None}))
-        refused = _save(project_id, changed)
+        refused = stored.save(changed)
         return (no_update, refused, None) if refused is not None else (_redrawn(project_id), None, None)
 
 

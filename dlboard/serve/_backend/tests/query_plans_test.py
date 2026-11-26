@@ -90,7 +90,9 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     ),
     "kept_runs": lambda s, e: s.kept_runs(e, run_ids=None),
     # Every project's, not the experiment's: what ended since a reader's last page, sought from there (#704).
-    "runs_done_since": lambda s, _e: s.runs_done_since((pendulum.now("UTC"), 10), limit=100),
+    "runs_done_since": lambda s, _e: s.runs_done_since(
+        (pendulum.now("UTC"), 10), before=pendulum.now("UTC"), limit=100
+    ),
     "metric_series": lambda s, e: s.metric_series(e, run_id=1, key="loss", after=(5, 100), limit=100),
     "artifact_series": lambda s, e: s.artifact_series(e, run_id=1, key="img", after=(5, 100), limit=100),
     "artifact_series, of no step": lambda s, e: s.artifact_series(
