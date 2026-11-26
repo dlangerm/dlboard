@@ -63,6 +63,14 @@ class NewRun(BaseModel, frozen=True, extra="ignore"):
     """
 
 
+RUN_END_SETTLES = pendulum.duration(minutes=1)
+"""
+How long after a `Run.done_at` every run stamped before it has committed: it is stamped by the writing host's clock just
+before its transaction commits, so another run's, stamped earlier, may commit later. A minute covers that, and hosts'
+clocks a little apart; a reader of `runs_done_since` that must miss none reads no nearer to now than this.
+"""
+
+
 class Run(NewRun, frozen=True, extra="ignore"):
     """A run stored in the database. `extra="ignore"`: this crosses the wire -- see `dlboard._wire`."""
 

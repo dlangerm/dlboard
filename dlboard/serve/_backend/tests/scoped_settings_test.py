@@ -75,3 +75,20 @@ def test_one_read_gives_every_projects_setting_but_a_deleted_one_s_or_a_deleted_
     assert {p: (s.project and s.project.value, set(s.experiments)) for p, s in everything.items()} == {
         kept: ({"n": 1}, {live})
     }
+
+
+def test_a_write_that_expects_what_it_read_is_refused_once_someone_else_changed_it(
+    store: SQLStoreBase[Any], admin: models.User
+) -> None:
+    """Nothing written over a change made since the read: neither a value read, nor one that wasn't there."""
+    project = store.create_project(models.NewProject(name="p", description="")).id
+    store.put_scoped_setting("plugin.rule", project, None, {"n": 1}, admin, expected=None)
+    with pytest.raises(models.SettingConflictError):
+        store.put_scoped_setting("plugin.rule", project, None, {"n": 9}, admin, expected=None)
+    read = store.get_scoped_settings("plugin.rule", project).project
+    assert read is not None
+    store.put_scoped_setting("plugin.rule", project, None, {"n": 2}, admin, expected=read)
+    for stale in ({"n": 3}, None):
+        with pytest.raises(models.SettingConflictError):
+            store.put_scoped_setting("plugin.rule", project, None, stale, admin, expected=read)
+    assert _values(store, project) == ({"n": 2}, {})

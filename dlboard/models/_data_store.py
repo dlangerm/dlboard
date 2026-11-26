@@ -10,6 +10,7 @@ from contextlib import AbstractContextManager
 from dlboard.models._comparison import ComparisonFilter
 from dlboard.models._metric import MetricReduction, SeriesBand
 from dlboard.models._pin import PinColor
+from dlboard.models._scoped_setting import Overwrite
 
 SUMMARY_RUNS: typing.Final = 100
 """
@@ -425,11 +426,15 @@ class DataStore(typing.Protocol[_P]):
         """Give up as lost (`UNKNOWN`, `lost_at`) at most `limit` running runs not heard from since `quiet_since`."""
         ...
 
-    def runs_done_since(self, after: tuple[datetime, int] | None, *, limit: int) -> list[models.Run]:
+    def runs_done_since(
+        self, after: tuple[datetime, int] | None, *, before: datetime, limit: int
+    ) -> list[models.Run]:
         """
-        Up to `limit` runs of every project that ended after `after`, a `(done_at, id)` (`None`: from the first), earliest first.
+        Up to `limit` runs of every project that ended between `after` and `before`, earliest first.
 
-        What a task that acts on runs ending reads, a page at a time from where it left off (`Run.done_at`).
+        `after` is a `(done_at, id)`, or `None` from the first. What a task that acts on runs ending reads, a page at a time from where it left off (`Run.done_at`). `done_at` is
+        stamped before its transaction commits, so a run can appear behind a page already read: a reader that must see
+        every run reads only up to a `before` far enough back (`RUN_END_SETTLES`) for any end stamped earlier to be in.
         """
         ...
 
@@ -667,19 +672,24 @@ class DataStore(typing.Protocol[_P]):
         """A plugin's setting `key` of every project that has any (its own, or an experiment's), in one read."""
         ...
 
-    def put_scoped_setting(
+    def put_scoped_setting(  # noqa: PLR0913 -- the scope, the value, who writes it, and what it replaces
         self,
         key: str,
         project_id: int,
         experiment_id: int | None,
         value: dict[str, typing.Any] | None,
         actor: models.User,
+        *,
+        expected: models.ScopedSetting | Overwrite | None = Overwrite.ANYTHING,
     ) -> models.ScopedSetting | None:
         """
         Set a plugin's setting `key` for a project (`experiment_id` of `None`) or one of its experiments; `None` deletes it.
 
         Raises `ValueError` for an experiment that is not the project's. Who may is the `SettingRule` the plugin registered
         for `key`: with none, no request may read or write it.
+
+        A read-modify-write passes what it read as `expected` (`None`: there was none): if the scope holds anything else
+        by then, nothing is written and `SettingConflictError` is raised, so no two writers lose each other's change.
         """
         ...
 

@@ -1584,15 +1584,17 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         self._touch({experiment_id for (experiment_id,) in marked}, _Touch.ACTIVITY)
         return len(marked)
 
-    def runs_done_since(self, after: tuple[datetime, int] | None, *, limit: int) -> list[models.Run]:
+    def runs_done_since(
+        self, after: tuple[datetime, int] | None, *, before: datetime, limit: int
+    ) -> list[models.Run]:
         """
-        Up to `limit` (non-deleted) runs of every project that ended after `after`, a `(done_at, id)`, the earliest first.
+        Up to `limit` (non-deleted) runs of every project that ended between `after` and `before`, the earliest first.
 
-        `None` starts from the first. Sought from `after` in `idx_Run_done`, so a page costs what the first did, however
+        `after` is a `(done_at, id)`, or `None` from the first. Sought from `after` in `idx_Run_done`, so a page costs what the first did, however
         many runs ended before it.
         """
         runs = self._tables[models.Run]
-        query = sa.select(runs).where(runs.c.done_at.is_not(None), runs.c.deleted_at.is_(None))
+        query = sa.select(runs).where(runs.c.done_at < before, runs.c.deleted_at.is_(None))
         if after is not None:
             done_at, run_id = after
             # The plain bound is what the index seeks from; the rest only settles ties at that one moment.
@@ -2971,15 +2973,21 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             by_project.setdefault(row.project_id, []).append(row)
         return {project_id: _scopes(found) for project_id, found in by_project.items()}
 
-    def put_scoped_setting(
+    def put_scoped_setting(  # noqa: PLR0913 -- the scope, the value, who writes it, and what it replaces
         self,
         key: str,
         project_id: int,
         experiment_id: int | None,
         value: dict[str, Any] | None,
         actor: models.User,
+        *,
+        expected: models.ScopedSetting | models.Overwrite | None = models.Overwrite.ANYTHING,
     ) -> models.ScopedSetting | None:
-        """Replace (or with `None`, delete) one scope's setting `key`, in one transaction: the scope's row, or none."""
+        """
+        Replace (or with `None`, delete) one scope's setting `key`, in one transaction: the scope's row, or none.
+
+        With an `expected`, the scope's row is locked and must still be that one (by its `updated_at`), or absent for `None`.
+        """
         if experiment_id is not None:
             experiment = self.get_experiment(experiment_id)
             if experiment is None or experiment.project_id != project_id:
@@ -2993,7 +3001,18 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             if experiment_id is None
             else settings.c.experiment_id == experiment_id
         )
+        conflict = models.SettingConflictError(
+            f"Setting {key} of project {project_id} changed since it was read"
+        )
         with self._begin() as conn:
+            if not isinstance(expected, models.Overwrite):
+                held = conn.execute(
+                    sa.select(settings.c.updated_at)
+                    .where(settings.c.key == key, settings.c.project_id == project_id, in_scope)
+                    .with_for_update()
+                ).scalar_one_or_none()
+                if held != (expected.updated_at if expected is not None else None):
+                    raise conflict
             if value is None:
                 conn.execute(
                     sa.delete(settings).where(
@@ -3006,7 +3025,11 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             new = models.NewScopedSetting(
                 key=key, project_id=project_id, experiment_id=experiment_id, value=value, updated_by=actor.id
             )
-            conn.execute(self._insert_ignoring_conflicts(settings).values(sql.row_values(new)))
+            inserted = conn.execute(self._insert_ignoring_conflicts(settings).values(sql.row_values(new)))
+            if (
+                expected is None and inserted.rowcount == 0
+            ):  # there was no row to lock: another writer's insert won
+                raise conflict
             row = (
                 conn.execute(
                     sa.update(settings)

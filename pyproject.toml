@@ -397,7 +397,11 @@ ignore_names = [
   "PLUGINS",  # used when configuring custom dlboard plugins in the server
   # `serve/telemetry` `Attributes` fields are only ever read through `dataclasses.fields()` (to name the label),
   # never by a `.reason` vulture can see.
-  "reason"
+  "reason",
+  # A webhook payload's field: only ever serialized, to the receiver.
+  "duration_s",
+  # `requests.Session`'s own switch, set to keep a webhook's post off any proxy; read by `requests`.
+  "trust_env"
 ]
 min_confidence = 60
 paths = ["dlboard/"]

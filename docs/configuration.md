@@ -80,6 +80,7 @@ Posting each run that ends to its project's webhooks: see [webhooks.md](webhooks
 | Variable | Default | |
 | --- | --- | --- |
 | `DLBOARD_WEBHOOK_ALLOWED_HOSTS` | none | Comma-separated hosts a webhook may post to though they resolve to an address that isn't public (this machine, a private network, a tailnet): an internal chat server, say. |
+| `DLBOARD_WEBHOOK_PUBLIC_URL` | none | Where people reach the server (`https://dlboard.example.com`), for the links in what a webhook posts; unset, each webhook's links use the address its owner reached the server at. |
 | `DLBOARD_WEBHOOK_MAX_PER_PROJECT` | `10` | The most webhooks a project has. |
 | `DLBOARD_WEBHOOK_TIMEOUT_S` | `5` | How long a post waits to connect, and then for the answer. |
 | `DLBOARD_WEBHOOK_ATTEMPTS` | `10` | Tries a post gets, a minute apart and doubling, before its webhook is turned off: about eight and a half hours. |

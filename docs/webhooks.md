@@ -16,10 +16,15 @@ Each project's owners set its webhooks on the project page's **Webhooks** tab, e
 - **The secret:** the server makes one for each webhook and shows it once, as the webhook is added.
   It is never shown again, so copy it then.
 - **When:** the server looks for runs that ended every 30 seconds (`DLBOARD_WEBHOOK_INTERVAL_S`), and posts each to every webhook of its project that asks for how it ended.
+  It looks only at runs that ended at least a minute ago, so a run whose end was still being saved is never passed over: a post comes a minute or two after the run ends.
   A run that reports the same end twice (Lightning does, after `fit` and after `test`) is posted once; a run that ended before a webhook was added is not posted to it.
   Posting is done by the [custodian](background-tasks.md), so training never waits on it.
-- **Retries:** a post that fails (no answer within 5 seconds, or anything but a 2xx) is tried again a minute later, then two, four, and so on.
+- **Retries:** a post that may land later (no answer within 5 seconds, a 408, a 429 or a 5xx) is tried again a minute later, then two, four, and so on.
   After 10 tries, about eight and a half hours (`DLBOARD_WEBHOOK_ATTEMPTS`), the webhook is turned off, and its tab says why; **Turn on** turns it back on.
+  A 404 or 410 says the endpoint is gone (a deleted Slack webhook answers so), and turns the webhook off at once.
+  Any other answer that isn't a 2xx (a 400, a 403, a redirect) refuses that one post, which would be refused again: it is dropped, and the webhook stays on.
+  Runs that end while a webhook is off are not sent to it, then or once it is turned on again.
+- **Repeats:** every try of a post has the same body, the run as it was when it ended, and the same `X-Dlboard-Delivery` id, so a receiver that got a post whose answer was lost can drop the repeat.
 
 ## What is posted
 
@@ -36,7 +41,7 @@ Each project's owners set its webhooks on the project page's **Webhooks** tab, e
 
 `event` is `run.finished`, `run.failed`, `run.crashed` or `run.ended`, and also sent as the `X-Dlboard-Event` header.
 `text` says it all in a sentence, which is all a Slack incoming webhook reads, so a Slack webhook URL works as it is.
-The links start with the server's address as the owner who added the webhook reached it.
+The links start with `DLBOARD_WEBHOOK_PUBLIC_URL` if an admin set it, and otherwise with the server's address as the owner who added the webhook reached it.
 
 **Checking a post is dlboard's.**
 `X-Dlboard-Signature: t=<unix time>,v1=<hex>` is the HMAC-SHA256, keyed with the webhook's secret, of `<unix time>.` followed by the raw body.
@@ -56,6 +61,8 @@ def is_dlboard(secret: str, header: str, body: bytes) -> bool:
 
 A webhook makes the server send a request to a URL someone typed in, so the server refuses any URL whose host resolves to an address that isn't public: this machine, a private network, link-local (a cloud's metadata service), carrier-grade NAT (a tailnet).
 It resolves the host once per post and connects to that address, so a DNS answer that changes in between can't redirect it, and it follows no redirects.
+For the same reason a post never goes through an HTTP proxy (`HTTPS_PROXY` is ignored), which would connect to the host by its name.
+It trusts the system's CAs and the bundle `requests` ships, so an internal server with a private CA works once that CA is in the system's trust store.
 
 To let webhooks reach an internal server (a self-hosted Mattermost, a tailnet bot), an admin lists its host name or address in `DLBOARD_WEBHOOK_ALLOWED_HOSTS`.
 The rest of the `DLBOARD_WEBHOOK_*` settings are in [Configuration](configuration.md#webhooks).

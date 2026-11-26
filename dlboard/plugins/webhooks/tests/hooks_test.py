@@ -2,21 +2,45 @@
 
 from __future__ import annotations
 
-from typing import Any
+import shutil
+import subprocess
+import threading
+import uuid
+from typing import TYPE_CHECKING, Any
 
 import pendulum
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from pydantic import HttpUrl
+from werkzeug.serving import make_server
 
 from dlboard import models
-from dlboard.plugins.webhooks._hooks import ProjectWebhooks, RefusedError, Webhook, WebhookEvent, check_url
+from dlboard.plugins.webhooks._hooks import (
+    ExperimentRef,
+    Failure,
+    ProjectRef,
+    ProjectWebhooks,
+    RefusedError,
+    RunSummary,
+    Signature,
+    Webhook,
+    WebhookEvent,
+    WebhookPayload,
+    check_url,
+    send,
+)
 from dlboard.plugins.webhooks._tab import checked
 from dlboard.serve import SettingWrite
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    from wsgiref.types import StartResponse, WSGIEnvironment
 
 
 def _hooks(*urls: str) -> dict[str, Any]:
     made = [
-        Webhook(url=HttpUrl(u), events=frozenset(WebhookEvent), link_base="https://d", created_by=1)
+        Webhook(url=HttpUrl(u), events=frozenset(WebhookEvent), link_base=HttpUrl("https://d/"), created_by=1)
         for u in urls
     ]
     return ProjectWebhooks(hooks=tuple(made)).model_dump(mode="json")
@@ -95,3 +119,79 @@ def _run(status: models.RunStatus, *, lost: bool = False) -> models.Run:
 )
 def test_how_a_run_ended_is_its_event(run: models.Run, event: WebhookEvent | None) -> None:
     assert WebhookEvent.of(run) is event
+
+
+@pytest.mark.parametrize(
+    ("status", "failure"),
+    [
+        (500, Failure.RETRY),
+        (503, Failure.RETRY),
+        (408, Failure.RETRY),
+        (429, Failure.RETRY),
+        (404, Failure.GONE),
+        (410, Failure.GONE),
+        (400, Failure.REJECTED),
+        (403, Failure.REJECTED),
+        (302, Failure.REJECTED),  # redirects are not followed
+    ],
+)
+def test_what_a_receivers_answer_makes_of_a_delivery(status: int, failure: Failure) -> None:
+    assert Failure.of(status) is failure
+
+
+@given(secret=st.text(min_size=1, max_size=8), body=st.binary(max_size=16), at=st.integers(0, 2**40))
+def test_a_signature_reads_back_as_the_header_says_it(secret: str, body: bytes, at: int) -> None:
+    signed = Signature.of(secret, body, at)
+    assert Signature.parse(signed.header) == signed
+
+
+def _answer(_environ: WSGIEnvironment, start_response: StartResponse) -> list[bytes]:
+    start_response("204 No Content", [])
+    return []
+
+
+@pytest.mark.skipif(shutil.which("openssl") is None, reason="makes its certificate with openssl")
+@pytest.mark.parametrize(("named", "lands"), [("localhost", True), ("other.example", False)])
+def test_a_post_over_https_goes_to_the_checked_address_and_checks_the_certificate_against_the_urls_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, named: str, lands: bool
+) -> None:
+    """Connected to by its address, the receiver is still known by its host's name: a certificate for another isn't it."""
+    cert, key = tmp_path / "cert.pem", tmp_path / "key.pem"
+    subprocess.run(
+        [
+            *("openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-nodes"),
+            *("-keyout", str(key), "-out", str(cert), "-days", "1", "-subj", f"/CN={named}"),
+            *("-addext", f"subjectAltName=DNS:{named}"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.setenv("SSL_CERT_FILE", str(cert))  # trusted as the system's CAs are
+    monkeypatch.setenv("DLBOARD_WEBHOOK_ALLOWED_HOSTS", "localhost")
+    server = make_server("127.0.0.1", 0, _answer, ssl_context=(str(cert), str(key)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    hook = Webhook(
+        url=HttpUrl(f"https://localhost:{server.server_port}/hook"),
+        events=frozenset(WebhookEvent),
+        link_base=HttpUrl("https://d/"),
+        created_by=1,
+    )
+    payload = WebhookPayload(
+        event=WebhookEvent.FINISHED,
+        text="r finished",
+        project=ProjectRef(id=1, name="p"),
+        experiment=ExperimentRef(id=1, name=None),
+        run=RunSummary(
+            id=1, name=None, status=None, created_at=pendulum.now("UTC"), ended_at=None, duration_s=None
+        ),
+        url=HttpUrl("https://d/experiment/1?run=1"),
+    )
+    try:
+        if lands:
+            send(hook, payload, uuid.uuid4())
+        else:
+            with pytest.raises(RefusedError, match="didn't answer"):
+                send(hook, payload, uuid.uuid4())
+    finally:
+        server.shutdown()
+        server.server_close()
