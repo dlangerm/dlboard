@@ -378,6 +378,9 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     # The runs still running, by when they were last heard from: what the sweep for lost runs reads, without the rest.
     running = sa.and_(runs.c.status == models.RunStatus.RUNNING.value, live)
     sa.Index("idx_Run_running", runs.c.last_seen_at, sqlite_where=running, postgresql_where=running)
+    # The runs that ended, by when the server recorded it: what ended since a moment (`runs_done_since`), without the rest.
+    done = sa.and_(runs.c.done_at.is_not(None), live)
+    sa.Index("idx_Run_done", runs.c.done_at, runs.c.id, sqlite_where=done, postgresql_where=done)
     # A tag's runs of an experiment, which is how a list is filtered by it; a run's tags by its unique `(run_id, tag_id)`.
     run_tags = tables[models.RunTag]
     sa.Index("idx_RunTag_tag", run_tags.c.tag_id, run_tags.c.experiment_id)
@@ -1358,14 +1361,27 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         return next(iter(self._by_id(models.Run, run_id)), None)
 
     def finish_run(self, run_id: int, status: models.RunStatus, ended_at: datetime) -> models.Run:
-        """Record that a run is done: its `status` and when it `ended_at`. Raises if it is missing or deleted."""
+        """
+        Record that a run is done: its `status` and when it `ended_at`. Raises if it is missing or deleted.
+
+        `done_at` moves to now only if the status is one the run didn't have: a run reporting the same end again (Lightning
+        finalizes after `fit` and after `test`) ended once.
+        """
         self._ensure_not_deleted(models.Run, run_id)
         runs = self._tables[models.Run]
+        changed = sa.or_(runs.c.done_at.is_(None), runs.c.status.is_distinct_from(status.value))
         (finished,) = self._fetch(
             models.Run,
             sa.update(runs)
             .where(runs.c.id == run_id)
-            .values(status=status.value, ended_at=ended_at)
+            .values(
+                status=status.value,
+                ended_at=ended_at,
+                done_at=sa.case(
+                    (changed, sa.literal(pendulum.now(pendulum.UTC), runs.c.done_at.type)),
+                    else_=runs.c.done_at,
+                ),
+            )
             .returning(runs),
         )
         self._touch({finished.experiment_id}, _Touch.ACTIVITY)
@@ -1526,6 +1542,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                 last_seen_at=now,
                 status=sa.case((lost, models.RunStatus.RUNNING.value), else_=runs.c.status),
                 ended_at=sa.case((lost, sa.null()), else_=runs.c.ended_at),
+                done_at=sa.case((lost, sa.null()), else_=runs.c.done_at),
                 lost_at=None,
             )
         )
@@ -1552,18 +1569,37 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             .limit(limit)
             .scalar_subquery()
         )
+        now = pendulum.now(pendulum.UTC)
         marked = self._execute(
             sa.update(runs)
             .where(runs.c.id.in_(due))
             .values(
                 status=models.RunStatus.UNKNOWN.value,
                 ended_at=sa.func.coalesce(runs.c.last_seen_at, runs.c.created_at),
-                lost_at=pendulum.now(pendulum.UTC),
+                lost_at=now,
+                done_at=now,
             )
             .returning(runs.c.experiment_id)
         )
         self._touch({experiment_id for (experiment_id,) in marked}, _Touch.ACTIVITY)
         return len(marked)
+
+    def runs_done_since(self, after: tuple[datetime, int] | None, *, limit: int) -> list[models.Run]:
+        """
+        Up to `limit` (non-deleted) runs of every project that ended after `after`, a `(done_at, id)`, the earliest first.
+
+        `None` starts from the first. Sought from `after` in `idx_Run_done`, so a page costs what the first did, however
+        many runs ended before it.
+        """
+        runs = self._tables[models.Run]
+        query = sa.select(runs).where(runs.c.done_at.is_not(None), runs.c.deleted_at.is_(None))
+        if after is not None:
+            done_at, run_id = after
+            # The plain bound is what the index seeks from; the rest only settles ties at that one moment.
+            query = query.where(
+                runs.c.done_at >= done_at, sa.or_(runs.c.done_at > done_at, runs.c.id > run_id)
+            )
+        return self._fetch(models.Run, query.order_by(runs.c.done_at, runs.c.id).limit(limit))
 
     def fetch_metrics(
         self,

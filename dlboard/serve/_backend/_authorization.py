@@ -568,6 +568,11 @@ class AuthorizingDataStore(models.DataStore[[]]):
         require_scope(self._actor, Scope.ALL)
         return self._inner.mark_lost_runs(quiet_since, limit=limit)
 
+    def runs_done_since(self, after: tuple[datetime, int] | None, *, limit: int) -> list[models.Run]:
+        # Every project's: for a custodian's task, which no user is behind.
+        require_scope(self._actor, Scope.ALL)
+        return self._inner.runs_done_since(after, limit=limit)
+
     def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
         self.require_run_write(context.run_id, context.experiment_id)
         return self._inner.record_run_context(context)
@@ -999,15 +1004,25 @@ class AuthorizingDataStore(models.DataStore[[]]):
         return self._settings[key, project_id]
 
     def get_scoped_settings(self, key: str, project_id: int) -> models.ScopedSettings:
-        self._require(project_id, self._setting_rule(key).read)
+        # As a write: a setting only its owners read (one with a secret in it) is an admin's to read where grants are
+        # not enforced, where everyone else is an editor.
+        self._require_role_or_admin(project_id, self._setting_rule(key).read)
         return self._read_settings(key, project_id)
 
     def all_scoped_settings(self, key: str) -> dict[int, models.ScopedSettings]:
         rule = self._setting_rule(key)
+
+        def readable(project_id: int) -> bool:
+            try:
+                self._require_role_or_admin(project_id, rule.read)
+            except PermissionError:
+                return False
+            return True
+
         return {
             project_id: found
             for project_id, found in self._inner.all_scoped_settings(key).items()
-            if self._can(project_id, rule.read)
+            if readable(project_id)
         }
 
     def put_scoped_setting(
