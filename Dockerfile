@@ -73,8 +73,9 @@ WORKDIR /home/dlboard
 EXPOSE 8050
 
 # `curl`/`wget` aren't in this slim image and installing either just for this would pull in apt
-# machinery this image otherwise never needs: dlboard's own check asks the liveness route, over
-# HTTPS when native TLS is on (`DLBOARD_SSL_CERTIFICATE`).
+# machinery this image otherwise never needs: dlboard's own check asks the liveness route, on
+# `DLBOARD_PORT` (which `dlboard serve` listens on too; 8050 unset), over HTTPS when native TLS is on
+# (`DLBOARD_SSL_CERTIFICATE`).
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD ["python", "-m", "dlboard.scripts.healthcheck"]
 

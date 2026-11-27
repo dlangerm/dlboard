@@ -31,6 +31,7 @@ from dlboard.client.tensorboard import STATE_FILE, import_logdir
 from dlboard.plugins.auth.password import create_or_reset_user, new_password_problem
 from dlboard.plugins.data_stores.filesystem import AppSettings as FilesystemAppSettings
 from dlboard.plugins.data_stores.sqlite import AppSettings as SqliteAppSettings
+from dlboard.scripts.healthcheck import DEFAULT_PORT
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store, resolve_plugins, run_production_server, set_setting_env
 from dlboard.serve._custodian._process import CustodianProcess, die_with_parent
@@ -81,7 +82,13 @@ class ServerRuntimeOptions:
         bool, cyclopts.Parameter(help="Run the underlying Dash dev server instead of the production server.")
     ] = False
     host: Annotated[str, cyclopts.Parameter(help="Interface to bind to.")] = "127.0.0.1"
-    port: Annotated[int, cyclopts.Parameter(help="Port to listen on.")] = 8050
+    port: Annotated[
+        int,
+        cyclopts.Parameter(
+            env_var="DLBOARD_PORT",
+            help="Port to listen on. In a container, set DLBOARD_PORT instead: the image's health check asks that one.",
+        ),
+    ] = DEFAULT_PORT
     workers: Annotated[
         int,
         cyclopts.Parameter(

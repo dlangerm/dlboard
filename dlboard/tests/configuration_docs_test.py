@@ -24,9 +24,11 @@ def _env_vars() -> list[str]:
     """The env var of every field of every non-test `BaseSettings` class defined in `dlboard`."""
     for module in pkgutil.walk_packages(dlboard.__path__, "dlboard."):
         # These do real work on import (Alembic's `env.py`, the dev/deployment scripts, Granian's
-        # WSGI target, Dash's flat page files that register with a running app); none define settings.
+        # WSGI target, Dash's flat page files that register with a running app); none define settings
+        # but the image's health check, which does nothing until it is run.
         if not re.search(
-            r"\.(tests|migrations|scripts)\.|\._wsgi$|^dlboard\.serve\._pages\.[a-z]+$", module.name
+            r"\.(tests|migrations)\.|\.scripts\.(?!healthcheck$)|\._wsgi$|^dlboard\.serve\._pages\.[a-z]+$",
+            module.name,
         ):
             importlib.import_module(module.name)
     found: set[str] = set()

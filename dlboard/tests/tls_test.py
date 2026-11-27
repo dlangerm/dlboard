@@ -168,10 +168,12 @@ def test_a_renewed_certificate_is_served_once_the_workers_restart(server: _Serve
 
 def test_the_image_health_check_asks_over_https_when_the_server_serves_it(server: _Server) -> None:
     """By `DLBOARD_SSL_CERTIFICATE`, which the container's environment has as the server's does; plain HTTP is refused."""
-    plain = {k: v for k, v in os.environ.items() if k != "DLBOARD_SSL_CERTIFICATE"}
+    plain = {k: v for k, v in os.environ.items() if k != "DLBOARD_SSL_CERTIFICATE"} | {
+        "DLBOARD_PORT": str(server.port)
+    }
 
     def healthy(env: dict[str, str]) -> bool:
-        command = [sys.executable, "-m", "dlboard.scripts.healthcheck", "--port", str(server.port)]
+        command = [sys.executable, "-m", "dlboard.scripts.healthcheck"]
         return subprocess.run(command, env=env, check=False, timeout=DEADLINE_S).returncode == 0
 
     assert healthy({**plain, "DLBOARD_SSL_CERTIFICATE": str(server.cert)})

@@ -17,6 +17,7 @@ Names are part of the [compatibility promise](compatibility.md): they don't chan
 | Variable | Default | |
 | --- | --- | --- |
 | `DLBOARD_PLUGINS` | | Import path to the `list[PluginProtocol]` to serve, e.g. `myapp.deployment:PLUGINS`. Set by `dlboard serve`; the same as `serve custom --plugins`. |
+| `DLBOARD_PORT` | `8050` | The port `dlboard serve` listens on, unless its `--port` says otherwise. The Docker image's health check asks this port, and it can't see the server's command line, so in a container set this instead of `--port`. |
 | `DLBOARD_URL_PREFIX` | none | Serve under a path prefix (`dlboard` for `https://host/dlboard/`) when a [reverse proxy](reverse-proxy.md) forwards the full path unchanged. |
 | `DLBOARD_TRUSTED_PROXIES` | `0` | How many reverse-proxy hops in front of dlboard to trust `X-Forwarded-*` from. Must be `1` or more behind a proxy, or HTTPS looks like HTTP and secure cookies break. |
 | `DLBOARD_COMPRESS_RESPONSES` | `true` | Compress what the server sends (pages, scripts, chart data) as zstd, Brotli or gzip, whichever the browser takes: a page of charts is about a fifth the size. Never a picture or other already-compressed artifact, and never to a browser on the same machine, where it would only cost time. Turn it off when a [reverse proxy](reverse-proxy.md) in front already compresses. |

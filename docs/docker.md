@@ -79,6 +79,7 @@ These are the ones every deployment needs; the full lists (TLS, pooling, timeout
 | `DLBOARD_ADMIN_USERS` | no | Comma-separated usernames made admin whenever they sign in — the alternative to creating the first admin by hand (below). |
 | `DLBOARD_MAX_UPLOAD_MB` | no | Hard cap on any single request body, mainly artifact uploads. Defaults to 256. |
 | `DLBOARD_TELEMETRY_METRICS` | no | `prometheus` to serve `/metrics`, `otlp` to push to a collector, or both -- the image has the `otel` extra. See [telemetry.md](telemetry.md). |
+| `DLBOARD_PORT` | no | The port the server listens on inside the container, and the one its health check asks. Defaults to 8050. Set this rather than adding `--port` to the command, which the health check can't see. |
 | `DLBOARD_STARTUP_WAIT_S` | no | How long to keep retrying a database or object store that isn't reachable yet before giving up. Defaults to 120; `0` fails on the first error. |
 
 Serve it over HTTPS, in front of a reverse proxy or by itself — session cookies are `Secure` by default, which most HTTP clients (browsers included, `localhost` sometimes excepted) silently refuse to send back over a plain-HTTP connection, breaking sign-in rather than just weakening it.
