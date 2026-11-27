@@ -5178,13 +5178,16 @@ def test_an_image_chart_reads_the_pictures_of_the_steps_its_slider_goes_to(
     _auto_generate_charts(page)
     chart = page.locator(".dl-chart-item").filter(has=page.locator(".dl-image-series"))
     caption = chart.locator(".dl-image-series-thumb + p")
+    thumb = chart.locator(".mantine-Slider-thumb")
     expect(caption).to_contain_text("at: 0")
 
-    chart.locator(".mantine-Slider-thumb").focus()
-    page.keyboard.press("End")
+    # Through the thumb, not `page.keyboard`: a press focuses the slider on the page at the time. The chart can be
+    # drawn again just after the page loads, and the focus would stay with the slider it replaced (#832).
+    thumb.press("End")
 
-    expect(chart.locator(".mantine-Slider-thumb")).to_have_attribute("aria-valuenow", str(last))
+    expect(thumb).to_have_attribute("aria-valuenow", str(last))
     expect(caption).to_contain_text(f"at: {last}")
-    page.keyboard.press("Home")
+    thumb.press("Home")
+    expect(thumb).to_have_attribute("aria-valuenow", "0")
     expect(caption).to_contain_text("at: 0")
     assert console_errors == []
