@@ -11,6 +11,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-27
+
 ### Added
 
 * **Webhooks: hear when a run ends, without keeping its page open.**
