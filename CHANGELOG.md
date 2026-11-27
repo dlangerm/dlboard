@@ -17,11 +17,15 @@ pulls that section's body into the GitHub release notes and publishes both distr
   A project's owners add webhooks on its new **Webhooks** tab, each for the ways a run ends it cares about (finished, failed, crashed); the server posts each run that ends there as signed JSON, whose `text` a Slack incoming webhook takes as it is.
   Posts are retried for hours, and a webhook that keeps failing is turned off, saying why.
   The server only posts to public addresses unless an admin allows a host (`DLBOARD_WEBHOOK_ALLOWED_HOSTS`); see [docs/webhooks.md](docs/webhooks.md).
+  A run's end is posted within two days of when it ended or not at all (`DLBOARD_WEBHOOK_EXPIRE_H`), so a server that was down, or a plugin list that drops webhooks and later lists them again, never posts runs long over.
 * **dlboard serves HTTPS itself, with no reverse proxy.**
   Point `DLBOARD_SSL_CERTIFICATE` and `DLBOARD_SSL_KEYFILE` at a certificate and its key (from `tailscale cert`, Let's Encrypt or your own CA) and the server answers HTTPS only, HTTP/2 to a browser that offers it; send it `SIGHUP` to serve a renewed certificate.
   A training script trusts a self-signed or private-CA certificate through `DLBOARD_CA_BUNDLE`, and the Docker image's health check asks over HTTPS.
 * **Sign-in by the proxy in front.**
   `TRUSTED_HEADER_AUTH` lets a reverse proxy that already signs people in (oauth2-proxy, Pomerium, Authelia, ...) say who they are in headers, believed from the proxy's own address (`DLBOARD_TRUSTED_HEADER_PROXIES`) alone.
+  An account is made on someone's first visit, known by the identity provider's stable id and named by its own header (`DLBOARD_TRUSTED_HEADER_USERNAME`); [docs/plugins/auth.md](docs/plugins/auth.md) says what a new account can see, and what to do when someone leaves.
+* **The custodian's retry backoff is a setting.**
+  A purge or webhook post that failed waits `DLBOARD_CUSTODIAN_RETRY_FIRST_S` (a minute) before its next try, doubling each time up to `DLBOARD_CUSTODIAN_RETRY_MAX_S` (a day).
 
 ### Changed
 
@@ -31,11 +35,18 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **A training script sends a quarter of the bytes.**
   What a run uploads is compressed as zstd, for a server that says it takes it; an older server still gets plain JSON.
   `dlboard-client` depends on `backports.zstd` below Python 3.14, where zstd joins the standard library.
+* **The Grafana dashboards show one server at a time.**
+  Pick it by **Service** and **Environment** at the top: the metrics dashboard no longer mixes in other services' `http_server_*` series, and the logs and traces dashboards follow a server whose `OTEL_SERVICE_NAME` isn't `dlboard`.
+  The artifact upload queue's depth has a panel of its own; see [docs/grafana/README.md](docs/grafana/README.md#which-server-they-show).
 
 ### Fixed
 
 * **A server killed outright no longer leaves its custodian running.**
   A server killed while it read its custodian's heartbeat left the custodian waiting on it for good, still holding the database.
+* **The Docker image's health check asks the port the server listens on.**
+  It asked 8050 whatever `--port` said, so an orchestrator restarted a healthy container on any other port; set `DLBOARD_PORT`, which both read, instead of `--port`.
+* **A new account whose name is already taken is told so.**
+  Signing in as a new identity under a username another account has was a server error; it is now refused with a message saying why.
 
 ## [0.20.3] - 2026-11-24
 
