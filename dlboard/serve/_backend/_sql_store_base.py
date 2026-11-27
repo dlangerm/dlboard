@@ -25,7 +25,7 @@ from dlboard.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 from dlboard.serve._backend._metric_frame import MetricFrame, MetricKeySummary, MetricRow
 from dlboard.serve._backend._purge_work import blob_deletion
 from dlboard.serve._backend._schema_upgrade import run_migrations
-from dlboard.serve._custodian._models import WorkItem
+from dlboard.serve._custodian._models import RunEnded, WorkItem
 from dlboard.serve._custodian._sql import TASK_TABLES, TASK_UNIQUE_COLUMNS, SQLTaskStore
 
 if TYPE_CHECKING:
@@ -378,9 +378,6 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     # The runs still running, by when they were last heard from: what the sweep for lost runs reads, without the rest.
     running = sa.and_(runs.c.status == models.RunStatus.RUNNING.value, live)
     sa.Index("idx_Run_running", runs.c.last_seen_at, sqlite_where=running, postgresql_where=running)
-    # The runs that ended, by when the server recorded it: what ended since a moment (`runs_done_since`), without the rest.
-    done = sa.and_(runs.c.done_at.is_not(None), live)
-    sa.Index("idx_Run_done", runs.c.done_at, runs.c.id, sqlite_where=done, postgresql_where=done)
     # A tag's runs of an experiment, which is how a list is filtered by it; a run's tags by its unique `(run_id, tag_id)`.
     run_tags = tables[models.RunTag]
     sa.Index("idx_RunTag_tag", run_tags.c.tag_id, run_tags.c.experiment_id)
@@ -1365,25 +1362,32 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         Record that a run is done: its `status` and when it `ended_at`. Raises if it is missing or deleted.
 
         `done_at` moves to now only if the status is one the run didn't have: a run reporting the same end again (Lightning
-        finalizes after `fit` and after `test`) ended once.
+        finalizes after `fit` and after `test`) ended once. A new end is queued for run-end work in the same transaction.
         """
         self._ensure_not_deleted(models.Run, run_id)
         runs = self._tables[models.Run]
         changed = sa.or_(runs.c.done_at.is_(None), runs.c.status.is_distinct_from(status.value))
-        (finished,) = self._fetch(
-            models.Run,
-            sa.update(runs)
-            .where(runs.c.id == run_id)
-            .values(
-                status=status.value,
-                ended_at=ended_at,
-                done_at=sa.case(
-                    (changed, sa.literal(pendulum.now(pendulum.UTC), runs.c.done_at.type)),
-                    else_=runs.c.done_at,
-                ),
+        now = pendulum.now(pendulum.UTC)
+        with self._begin() as conn:
+            row = (
+                conn.execute(
+                    sa.update(runs)
+                    .where(runs.c.id == run_id)
+                    .values(
+                        status=status.value,
+                        ended_at=ended_at,
+                        done_at=sa.case(
+                            (changed, sa.literal(now, runs.c.done_at.type)), else_=runs.c.done_at
+                        ),
+                    )
+                    .returning(runs)
+                )
+                .mappings()
+                .one()
             )
-            .returning(runs),
-        )
+            finished = sql.construct(models.Run, row)
+            if finished.done_at == now:  # this end is new: the old one stays as it was
+                self._queue_run_ends(conn, [RunEnded(run_id=run_id, done_at=now)])
         self._touch({finished.experiment_id}, _Touch.ACTIVITY)
         return finished
 
@@ -1570,38 +1574,22 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             .scalar_subquery()
         )
         now = pendulum.now(pendulum.UTC)
-        marked = self._execute(
-            sa.update(runs)
-            .where(runs.c.id.in_(due))
-            .values(
-                status=models.RunStatus.UNKNOWN.value,
-                ended_at=sa.func.coalesce(runs.c.last_seen_at, runs.c.created_at),
-                lost_at=now,
-                done_at=now,
-            )
-            .returning(runs.c.experiment_id)
-        )
-        self._touch({experiment_id for (experiment_id,) in marked}, _Touch.ACTIVITY)
+        with self._begin() as conn:
+            marked = conn.execute(
+                sa.update(runs)
+                .where(runs.c.id.in_(due))
+                .values(
+                    status=models.RunStatus.UNKNOWN.value,
+                    ended_at=sa.func.coalesce(runs.c.last_seen_at, runs.c.created_at),
+                    lost_at=now,
+                    done_at=now,
+                )
+                .returning(runs.c.id, runs.c.experiment_id)
+            ).all()
+            # Each one's end, queued with it: a lost run ends as surely as a finished one.
+            self._queue_run_ends(conn, (RunEnded(run_id=run_id, done_at=now) for run_id, _ in marked))
+        self._touch({experiment_id for _, experiment_id in marked}, _Touch.ACTIVITY)
         return len(marked)
-
-    def runs_done_since(
-        self, after: tuple[datetime, int] | None, *, before: datetime, limit: int
-    ) -> list[models.Run]:
-        """
-        Up to `limit` (non-deleted) runs of every project that ended between `after` and `before`, the earliest first.
-
-        `after` is a `(done_at, id)`, or `None` from the first. Sought from `after` in `idx_Run_done`, so a page costs what the first did, however
-        many runs ended before it.
-        """
-        runs = self._tables[models.Run]
-        query = sa.select(runs).where(runs.c.done_at < before, runs.c.deleted_at.is_(None))
-        if after is not None:
-            done_at, run_id = after
-            # The plain bound is what the index seeks from; the rest only settles ties at that one moment.
-            query = query.where(
-                runs.c.done_at >= done_at, sa.or_(runs.c.done_at > done_at, runs.c.id > run_id)
-            )
-        return self._fetch(models.Run, query.order_by(runs.c.done_at, runs.c.id).limit(limit))
 
     def fetch_metrics(
         self,

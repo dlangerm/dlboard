@@ -1,10 +1,10 @@
 """
-Webhooks' two background tasks: one finds the runs that ended, the other delivers what each webhook is sent.
+Webhooks' two background tasks: one finds what each run's end is sent, the other delivers it.
 
-- **Finding** (one at a time, every `DLBOARD_WEBHOOK_INTERVAL_S`) reads the runs that ended since it last looked
-  (`runs_done_since`, from a cursor it keeps in its own progress, up to `RUN_END_SETTLES` ago so that no end still being
-  committed is passed over) a page at a time, and queues a delivery, its body made then, for each webhook of the run's
-  project that asks for how it ended. A server with no webhooks reads one setting and nothing else.
+- **Finding** (any custodian, a page at a time) claims the runs' ends the store queued as each was recorded
+  (`register_run_end_work`), and queues a delivery, its body made then, for each webhook of the run's project that asks
+  for how it ended. An end is queued in the transaction that records it, so every end that commits is found, once, with
+  no cursor and no wait for slower transactions. One whose run was deleted, or heard from again, by then is dropped.
 - **Delivering** (any custodian, a few deliveries at a time) posts each one. One that fails is tried again later (a
   minute, doubling); one that has failed `DLBOARD_WEBHOOK_ATTEMPTS` times, or that the receiver says is gone, turns its
   webhook off, and the project's Webhooks tab says why. A post the receiver refuses outright is dropped. Each post has
@@ -16,8 +16,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pendulum
-from pydantic import AwareDatetime, BaseModel
+from pydantic import BaseModel
 from structlog.stdlib import get_logger
 
 from dlboard import models
@@ -34,18 +33,17 @@ from dlboard.plugins.webhooks._hooks import (
     send,
     subscribed,
 )
-from dlboard.serve import get_system_data_store
+from dlboard.serve import RunEnded, get_system_data_store
 from dlboard.serve._custodian import NewWorkItem, get_system_task_store
 
 if TYPE_CHECKING:
     from dlboard.models import DataStore
-    from dlboard.plugins.webhooks._hooks import Webhook
-    from dlboard.serve import TaskContext
+    from dlboard.serve import TaskContext, WorkItem
 
 _log = get_logger(__name__)
 
-_PAGE = 200
-"""Runs read a batch when finding what ended."""
+_ENDS = 100
+"""Run ends claimed a batch."""
 _DELIVERIES = 10
 """Deliveries claimed a batch."""
 _CONFLICT_TRIES = 3
@@ -65,21 +63,9 @@ class WebhookTask(StrEnum):
 class WebhookWork(StrEnum):
     """The plugin's work items. Stored as their kind, so a value is never renamed or removed."""
 
+    RUN_END = "webhook_run_end"
+    """A run's end, queued by the store as it is recorded (`RunEnded`)."""
     DELIVERY = "webhook_delivery"
-
-
-class _Cursor(BaseModel, frozen=True, extra="forbid"):
-    """Where finding left off: the last run it read, by when it ended."""
-
-    done_at: AwareDatetime
-    run_id: int
-
-
-class _FindProgress(BaseModel, frozen=True, extra="forbid"):
-    """What finding reports, and reads back on its next run: its backlog, and its cursor."""
-
-    backlog: int | None = None
-    cursor: _Cursor | None = None
 
 
 class Delivery(BaseModel, frozen=True, extra="forbid"):
@@ -97,64 +83,54 @@ class Delivery(BaseModel, frozen=True, extra="forbid"):
         return NewWorkItem(kind=WebhookWork.DELIVERY, key=self.key, payload=self.model_dump(mode="json"))
 
 
-def _progress(ctx: TaskContext) -> _FindProgress:
-    """What finding last reported about itself."""
-    states = get_system_task_store(ctx.app).task_states()
-    state = next((s for s in states if s.name == WebhookTask.FIND), None)
-    return _FindProgress.model_validate(state.progress) if state is not None else _FindProgress()
-
-
-def _deliveries(
-    store: DataStore[...], runs: list[models.Run], hooks: dict[int, tuple[Webhook, ...]]
-) -> list[Delivery]:
-    """What `runs` are sent: one delivery for each webhook of each run's project that asks for how it ended."""
-    experiments = {e.id: e for e in store.get_experiments_by_id({r.experiment_id for r in runs})}
-    projects = {p: store.get_project(p) for p in {e.project_id for e in experiments.values()}}
+def _deliveries(store: DataStore[...], ended: RunEnded) -> list[Delivery]:
+    """What one end of a run is sent: a delivery for each webhook of its project that asks for how it ended."""
+    run = store.get_run(ended.run_id)
+    if (
+        run is None or run.done_at != ended.done_at
+    ):  # deleted, or running again (and maybe ended another way) since
+        return []
+    event = WebhookEvent.of(run)
+    experiment = store.get_experiment(run.experiment_id)
+    project = store.get_project(experiment.project_id) if experiment is not None else None
+    if event is None or experiment is None or project is None:
+        return []
+    found = store.get_scoped_settings(WebhookKey.HOOKS, project.id).project
+    hooks = ProjectWebhooks.model_validate(found.value).hooks if found is not None else ()
     return [
         Delivery(
-            hook_id=hook.id, body=WebhookPayload.of(event, run, done_at, experiment, project, hook.link_base)
+            hook_id=hook.id,
+            body=WebhookPayload.of(event, run, ended.done_at, experiment, project, hook.link_base),
         )
-        for run in runs
-        if (done_at := run.done_at) is not None
-        and (event := WebhookEvent.of(run)) is not None
-        and (experiment := experiments.get(run.experiment_id)) is not None
-        and (project := projects[experiment.project_id]) is not None
-        for hook in subscribed(hooks.get(project.id, ()), event, run)
+        for hook in subscribed(hooks, event, run)
     ]
 
 
 def find_ended_runs(ctx: TaskContext) -> None:
-    """Queue a delivery for each webhook that asks for how each run that ended since the last look ended."""
+    """Queue a delivery for each webhook that asks for how each run whose end was queued ended."""
     store, tasks = get_system_data_store(ctx.app), get_system_task_store(ctx.app)
-    hooks = {
-        project_id: ProjectWebhooks.model_validate(found.project.value).hooks
-        for project_id, found in store.all_scoped_settings(WebhookKey.HOOKS).items()
-        if found.project is not None
-    }
-    made = [hook.created_at for project in hooks.values() for hook in project]
-    if not made:
-        ctx.report(
-            **_FindProgress(backlog=0).model_dump(mode="json")
-        )  # nothing to announce to, nor a place to start
-        return
-    # A first look starts where the first webhook was made: what ended before is no one's news. Not "now", which a clock
-    # stepped back could put after a run that ended just as it was taken.
-    cursor = _progress(ctx).cursor or _Cursor(done_at=min(made), run_id=0)
-    before = pendulum.now(pendulum.UTC) - models.RUN_END_SETTLES
     queued = 0
     while not ctx.should_stop():
-        with ctx.batch():
-            runs = store.runs_done_since((cursor.done_at, cursor.run_id), before=before, limit=_PAGE)
-            due = _deliveries(store, runs, hooks)
-            tasks.enqueue_work(delivery.queued() for delivery in due)
-        queued += len(due)
-        if runs:
-            last = runs[-1]  # read by its `done_at`, which it has
-            cursor = _Cursor(done_at=last.done_at or cursor.done_at, run_id=last.id)
-        if len(runs) < _PAGE:
+        claimed = ctx.claim(WebhookWork.RUN_END, limit=_ENDS)
+        if not claimed:
             break
-    backlog = tasks.count_work(WebhookWork.DELIVERY)
-    ctx.report(**_FindProgress(backlog=backlog, cursor=cursor).model_dump(mode="json"))
+        with ctx.batch():
+            due: list[Delivery] = []
+            found: list[WorkItem] = []
+            for item in claimed:
+                try:
+                    due += _deliveries(store, RunEnded.model_validate(item.payload))
+                except Exception as exc:  # noqa: BLE001 -- one end's failure must not hold up the others
+                    _log.warning("Finding what a run's end is sent failed", exc_info=True)
+                    ctx.retry(item, f"{type(exc).__name__}: {exc}")
+                    continue
+                found.append(item)
+            tasks.enqueue_work(delivery.queued() for delivery in due)
+            ctx.done(
+                found
+            )  # after the deliveries: an end claimed again, should this stop between, queues none twice
+        queued += len(due)
+    ctx.report(backlog=tasks.count_work(WebhookWork.DELIVERY))
     if queued:
         tasks.request_task_run(WebhookTask.DELIVER)
 

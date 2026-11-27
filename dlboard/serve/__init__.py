@@ -42,12 +42,14 @@ from dlboard.serve._backend._theme import get_theme, set_theme
 from dlboard.serve._clientside_script import ClientsideScript
 from dlboard.serve._custodian import (
     NewWorkItem,
+    RunEnded,
     Task,
     TaskContext,
     TaskMode,
     WorkItem,
     WorkRule,
     get_system_task_store,
+    register_run_end_work,
     register_task,
     register_work_kind,
 )
@@ -80,6 +82,7 @@ __all__ = [
     "Icon",
     "NewWorkItem",
     "ProjectTab",
+    "RunEnded",
     "RunGuard",
     "SQLStoreBase",
     "SeriesDash",
@@ -117,6 +120,7 @@ __all__ = [
     "mint_run_token",
     "register_experiment_section",
     "register_project_tab",
+    "register_run_end_work",
     "register_run_guard",
     "register_setting",
     "register_task",

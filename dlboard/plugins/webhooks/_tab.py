@@ -70,6 +70,10 @@ def _owns(project_id: int) -> bool:
     return has_scope(get_current_user(), Scope.ALL) or get_project_role(project_id) is ProjectRole.OWNER
 
 
+class _NotSavedError(Exception):
+    """A change the tab didn't save: why, in words for the project's owner."""
+
+
 @dataclass(frozen=True)
 class _Stored:
     """A project's webhooks as this request read them: what a change is made from, and saved over only if still there."""
@@ -89,8 +93,8 @@ class _Stored:
             else ProjectWebhooks()
         )
 
-    def save(self, changed: ProjectWebhooks) -> str | None:
-        """Store `changed` as the project's webhooks, unless they changed since they were read; why not, if refused."""
+    def save(self, changed: ProjectWebhooks) -> None:
+        """Store `changed` as the project's webhooks, unless they changed since they were read; `_NotSavedError` if not."""
         try:
             get_data_store().put_scoped_setting(
                 WebhookKey.HOOKS,
@@ -100,13 +104,14 @@ class _Stored:
                 get_current_user(),
                 expected=self.setting,
             )
-        except PermissionError:
-            return "Only an owner of the project changes its webhooks."
-        except SettingConflictError:
-            return "This project's webhooks changed just now (another owner, or the server turning one off): try again."
+        except PermissionError as refused:
+            msg = "Only an owner of the project changes its webhooks."
+            raise _NotSavedError(msg) from refused
+        except SettingConflictError as refused:
+            msg = "This project's webhooks changed just now (another owner, or the server turning one off): try again."
+            raise _NotSavedError(msg) from refused
         except ValueError as refused:
-            return str(refused)
-        return None
+            raise _NotSavedError(str(refused)) from refused
 
 
 def _row(hook: Webhook) -> Component:
@@ -218,17 +223,19 @@ class _Added(CallbackStates):
     project_id: Annotated[int, State(constants.STATE_PROJECT_ID, "data")]
 
 
-def _add(form: _Added) -> tuple[Webhook | None, str | None]:
-    """The webhook the form adds, or why not."""
+def _add(form: _Added) -> Webhook:
+    """The webhook the form adds, saved; `_NotSavedError` saying why not."""
     if not form.events:
-        return None, "Pick at least one way a run ends."
+        msg = "Pick at least one way a run ends."
+        raise _NotSavedError(msg)
     try:
         url = HttpUrl((form.url or "").strip())
         check_url(url)
-    except ValidationError:
-        return None, "That isn't a URL."
+    except ValidationError as invalid:
+        msg = "That isn't a URL."
+        raise _NotSavedError(msg) from invalid
     except RefusedError as refused:
-        return None, str(refused)
+        raise _NotSavedError(str(refused)) from refused
     stored = _Stored.read(form.project_id)
     hook = Webhook(
         url=url,
@@ -236,8 +243,8 @@ def _add(form: _Added) -> tuple[Webhook | None, str | None]:
         link_base=link_base(request.host_url, relative_path("/")),
         created_by=get_current_user().id,
     )
-    refused = stored.save(ProjectWebhooks(hooks=(*stored.hooks.hooks, hook)))
-    return (None, refused) if refused is not None else (hook, None)
+    stored.save(ProjectWebhooks(hooks=(*stored.hooks.hooks, hook)))
+    return hook
 
 
 def _redrawn(project_id: int) -> Component:
@@ -260,9 +267,10 @@ def register_webhook_callbacks(app: Dash) -> None:
         form = _Added.model_validate(states)
         if not form.clicks:  # the section drawn again, with a new button
             raise PreventUpdate
-        hook, refused = _add(form)
-        if hook is None:
-            return no_update, refused, None
+        try:
+            hook = _add(form)
+        except _NotSavedError as refused:
+            return no_update, str(refused), None
         return _redrawn(form.project_id), None, _secret_notice(hook)
 
     @app.callback(
@@ -283,8 +291,11 @@ def register_webhook_callbacks(app: Dash) -> None:
                 changed = hooks.replaced(hook.id, None)
             case _Action.TURN_ON:
                 changed = hooks.replaced(hook.id, hook.model_copy(update={"turned_off": None}))
-        refused = stored.save(changed)
-        return (no_update, refused, None) if refused is not None else (_redrawn(project_id), None, None)
+        try:
+            stored.save(changed)
+        except _NotSavedError as refused:
+            return no_update, str(refused), None
+        return _redrawn(project_id), None, None
 
 
 def checked(write: SettingWrite) -> dict[str, Any] | None:

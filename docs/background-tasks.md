@@ -90,7 +90,16 @@ Tests never start a custodian: they call a task's `run_once` with a `TaskContext
 ### When a run ends
 
 There is no hook that calls a plugin when a run finishes, fails or is lost, and there won't be: a run is finished by a request in a web worker and given up as lost by the custodian, so a callback would be split between processes, slow ingest down, and miss what happened while a process was down.
-A plugin that acts on how runs end (a notice when one fails, a summary once it is done) looks for them instead, in a `SINGLETON` task, as `lost_runs` (`dlboard/plugins/backend/lost_runs.py`) and retention (`dlboard/plugins/retention/`) do:
+
+**Each end, queued.**
+A plugin that acts on every end, once (webhooks, `dlboard/plugins/webhooks/`), asks for a work item of its own kind per end instead: `register_run_end_work(app, kind)` in `plug()`, and a `SHARED` task that claims `kind`.
+The store queues the item in the transaction that records the end, so every end that commits is queued exactly once, and one rolled back never is: no cursor to keep, and no guess at how long a slower transaction takes to commit.
+An end is a run's client reporting a status the run didn't have, or the run being given up as lost; a run that reports the same end again (Lightning's `fit`, then `test`) is not queued again.
+The payload is a `RunEnded` (`run_id`, `done_at`): by the time it is claimed the run may have been deleted, or heard from again, so compare its `done_at` with the run's before acting on it.
+Queueing costs one row in the ending transaction per kind asked for, which is all it adds to ingest.
+
+**Looking for them.**
+A plugin that acts on runs as they are (retention, a summary once a project goes quiet) looks for them instead, in a `SINGLETON` task, as `lost_runs` (`dlboard/plugins/backend/lost_runs.py`) and retention (`dlboard/plugins/retention/`) do:
 
 - **What ended.**
   A run is `RUNNING` until its client reports `FINISHED` or `FAILED` (a `with` block, Lightning's `finalize`), or `UNKNOWN` (its script exited without saying).

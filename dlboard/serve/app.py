@@ -34,6 +34,7 @@ from dlboard.serve._backend._sql_store_base import SQLStoreBase
 from dlboard.serve._backend._startup_checks import add_startup_check, run_startup_checks
 from dlboard.serve._backend._theme import get_theme
 from dlboard.serve._clientside_script import ClientsideScript
+from dlboard.serve._custodian import connect_run_end_work
 from dlboard.serve._density import (
     DEFAULT_DENSITY,
     DENSITY_STORE_ID,
@@ -198,6 +199,9 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.
     set_installed_plugins(_app, installed)
+    # Every plugin has plugged (inside `Dash(...)` above): the store now knows what a run's end queues, whichever plugin
+    # set the store and whichever asked, in whatever order they were listed.
+    connect_run_end_work(_app)
     # The navbar drag-to-resize handle, served with the width bounds `navbar_state.js` clamps to as well.
     serve_asset(
         _app,

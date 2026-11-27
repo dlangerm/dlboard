@@ -19,6 +19,7 @@ from dlboard.serve import sql
 from dlboard.serve._custodian._models import (
     Custodian,
     NewWorkItem,
+    RunEnded,
     TaskOutcome,
     TaskState,
     WorkItem,
@@ -36,6 +37,9 @@ _FORGOTTEN_AFTER: Final = pendulum.duration(days=7)
 
 class SQLTaskStore:
     """The `TaskStore` methods, over the tables `TASK_TABLES` adds to a store's schema."""
+
+    _run_end_work: frozenset[str] = frozenset()
+    """The kinds of work queued for every run's end (`queue_on_run_end`): none until the app says."""
 
     @property
     @abstractmethod
@@ -161,6 +165,20 @@ class SQLTaskStore:
         work = self.tables[WorkItem]
         for batch in itertools.batched((sql.row_values(item) for item in items), _BATCH):
             self._execute(self._insert_ignoring_conflicts(work).values(list(batch)))
+
+    def queue_on_run_end(self, kinds: frozenset[str]) -> None:
+        self._run_end_work = kinds
+
+    def _queue_run_ends(self, conn: sa.Connection, ends: Iterable[RunEnded]) -> None:
+        """Queue each end once for every kind of run-end work, on `conn`: in the transaction that records the ends."""
+        work = self.tables[WorkItem]
+        items = (
+            NewWorkItem(kind=kind, key=end.key, payload=end.model_dump(mode="json"))
+            for end in ends
+            for kind in self._run_end_work
+        )
+        for batch in itertools.batched((sql.row_values(item) for item in items), _BATCH):
+            conn.execute(self._insert_ignoring_conflicts(work).values(list(batch)))
 
     def claim_work(self, kind: str, holder: str, *, limit: int, until: datetime) -> list[WorkItem]:
         """

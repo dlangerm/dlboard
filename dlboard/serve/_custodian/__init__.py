@@ -6,13 +6,15 @@ starts one custodian process, which runs every registered task (`Supervisor`), a
 the database holds what every custodian is doing (`TaskStore`), which the admin page and `/healthz/custodian` read.
 """
 
-from dlboard.serve._custodian._models import NewWorkItem, TaskOutcome, WorkItem
+from dlboard.serve._custodian._models import NewWorkItem, RunEnded, TaskOutcome, WorkItem
 from dlboard.serve._custodian._role import in_custodian
 from dlboard.serve._custodian._store import (
     TaskStore,
     WorkRule,
+    connect_run_end_work,
     get_system_task_store,
     get_task_store,
+    register_run_end_work,
     register_work_kind,
 )
 from dlboard.serve._custodian._task import (
@@ -25,6 +27,7 @@ from dlboard.serve._custodian._task import (
 
 __all__ = [
     "NewWorkItem",
+    "RunEnded",
     "Task",
     "TaskContext",
     "TaskMode",
@@ -32,9 +35,11 @@ __all__ = [
     "TaskStore",
     "WorkItem",
     "WorkRule",
+    "connect_run_end_work",
     "get_system_task_store",
     "get_task_store",
     "in_custodian",
+    "register_run_end_work",
     "register_task",
     "register_work_kind",
     "registered_tasks",

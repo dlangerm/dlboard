@@ -23,7 +23,7 @@ import time
 import uuid
 from http import HTTPStatus
 from ipaddress import IPv4Address, IPv6Address, ip_address
-from typing import TYPE_CHECKING, Annotated, Any, Final, NamedTuple, Self, override
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, Self, override
 from urllib.parse import urljoin, urlsplit
 
 import pendulum
@@ -38,13 +38,14 @@ from pydantic import (
     field_serializer,
     field_validator,
 )
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from requests.adapters import HTTPAdapter
 from urllib3.util import parse_url
 
 from dlboard import models
 from dlboard._compat import StrEnum
 from dlboard._version import __version__
+from dlboard.serve import CommaSeparated
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -112,7 +113,7 @@ class WebhookSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="DLBOARD_WEBHOOK_")
 
-    allowed_hosts: Annotated[frozenset[str], NoDecode] = frozenset()
+    allowed_hosts: CommaSeparated[frozenset[str]] = frozenset()
     """Comma-separated hosts a webhook may reach though they resolve to a non-public address (an internal chat server)."""
     public_url: HttpUrl | None = None
     """Where people reach the server (scheme and host), for the links a post has; unset, where its owner reached it."""
@@ -122,12 +123,13 @@ class WebhookSettings(BaseSettings):
     attempts: PositiveInt = 10
     """Tries a delivery gets (a minute apart, doubling) before its webhook is turned off: about eight and a half hours."""
     interval_s: PositiveInt = 30
-    """How often the server looks for runs that ended."""
+    """How often the server looks for runs' ends to announce, and for deliveries to try again."""
 
-    @field_validator("allowed_hosts", mode="before")
+    @field_validator("allowed_hosts", mode="after")
     @classmethod
-    def _split_commas(cls, value: Any) -> Any:  # noqa: ANN401 -- a `mode="before"` validator sees the raw input
-        return {v.strip().lower() for v in value.split(",") if v.strip()} if isinstance(value, str) else value
+    def _lower(cls, hosts: frozenset[str]) -> frozenset[str]:
+        """As a URL's host is compared: in lower case."""
+        return frozenset(host.lower() for host in hosts)
 
 
 class Webhook(BaseModel, frozen=True, extra="forbid"):

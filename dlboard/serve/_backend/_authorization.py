@@ -568,13 +568,6 @@ class AuthorizingDataStore(models.DataStore[[]]):
         require_scope(self._actor, Scope.ALL)
         return self._inner.mark_lost_runs(quiet_since, limit=limit)
 
-    def runs_done_since(
-        self, after: tuple[datetime, int] | None, *, before: datetime, limit: int
-    ) -> list[models.Run]:
-        # Every project's: for a custodian's task, which no user is behind.
-        require_scope(self._actor, Scope.ALL)
-        return self._inner.runs_done_since(after, before=before, limit=limit)
-
     def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
         self.require_run_write(context.run_id, context.experiment_id)
         return self._inner.record_run_context(context)

@@ -30,7 +30,6 @@ _SEEKS: dict[str, str | tuple[str, ...]] = {
         "(experiment_id, created_at)",
         "(experiment_id, created_at) WHERE (deleted_at IS NULL)",
         "(experiment_id) WHERE (kept_at IS NOT NULL)",
-        "(done_at, id) WHERE ((done_at IS NOT NULL) AND (deleted_at IS NULL))",
     ),
     "RunPin": ("(experiment_id, pinned_at)", "(run_id, pinned_by, color)"),
     "ComparisonRun": "(page_id, run_id)",
@@ -89,10 +88,6 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
         s.get_runs(e, limit=20, run_ids=None, before=(pendulum.now("UTC"), 10))
     ),
     "kept_runs": lambda s, e: s.kept_runs(e, run_ids=None),
-    # Every project's, not the experiment's: what ended since a reader's last page, sought from there (#704).
-    "runs_done_since": lambda s, _e: s.runs_done_since(
-        (pendulum.now("UTC"), 10), before=pendulum.now("UTC"), limit=100
-    ),
     "metric_series": lambda s, e: s.metric_series(e, run_id=1, key="loss", after=(5, 100), limit=100),
     "artifact_series": lambda s, e: s.artifact_series(e, run_id=1, key="img", after=(5, 100), limit=100),
     "artifact_series, of no step": lambda s, e: s.artifact_series(

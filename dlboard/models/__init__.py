@@ -97,7 +97,7 @@ from dlboard.models._panel_frame import (
 from dlboard.models._pin import NamedPin, NewRunPin, PinColor, PinnedRun, PinnedRuns, Pinner, RunPin
 from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
-from dlboard.models._run import RUN_END_SETTLES, NewRun, Run, RunStatus
+from dlboard.models._run import NewRun, Run, RunStatus
 from dlboard.models._run_context import RUN_CONTEXT_DIFF_KEY, ContextSection, NewRunContext, RunContext
 from dlboard.models._run_tag import MAX_TAG_LENGTH, NewRunTag, NewTag, RunTag, Tag, TagName, normalize_tag
 from dlboard.models._scoped_setting import (
@@ -179,7 +179,6 @@ __all__ = [
     "PLOTLY_METRICS_TAG",
     "RUN_CONTEXT_COLUMN",
     "RUN_CONTEXT_DIFF_KEY",
-    "RUN_END_SETTLES",
     "RUN_NAME_COLUMN",
     "SERIES_BAND_COLUMN_PREFIX",
     "SUMMARY_RUNS",

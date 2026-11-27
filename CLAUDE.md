@@ -146,6 +146,7 @@ Granian's master starts it before its workers (`on_startup`), stops it after the
 A plugin never starts a thread or process for background work: it registers a `Task` in `plug()` (`register_task`), which every process registers and only the custodian runs.
 A task is `SINGLETON` (one at a time across every server, under a lease of three beats renewed every beat) or `SHARED` (each custodian claims its own batch of `WorkItem`s, `SKIP LOCKED` on Postgres).
 Work goes in a batch at a time inside `ctx.batch()` (duty-cycle pacing), checks `ctx.should_stop()` between batches, and reports its backlog (`ctx.report`).
+A plugin that acts on every run's end asks for a work item per end (`register_run_end_work`), which the store queues in the transaction that records the end; never a cursor over `done_at` or `ended_at`, whose order is not the order ends commit in.
 The database holds the truth (`TaskState`, `Custodian`, `WorkItem`, through the `TaskStore` protocol, separate from `DataStore`); a request reads it through `get_task_store()` and queues only kinds a plugin lets it (`register_work_kind`, with the scope it needs).
 Tests never start a custodian: they call a task's `run_once` with a `TaskContext`, or a `Supervisor` directly (`dlboard/serve/_custodian/tests/`); `custodian_process_test.py` drives the real process.
 

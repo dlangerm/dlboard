@@ -63,14 +63,6 @@ class NewRun(BaseModel, frozen=True, extra="ignore"):
     """
 
 
-RUN_END_SETTLES = pendulum.duration(minutes=1)
-"""
-How long after a `Run.done_at` every run stamped before it has committed: it is stamped by the writing host's clock just
-before its transaction commits, so another run's, stamped earlier, may commit later. A minute covers that, and hosts'
-clocks a little apart; a reader of `runs_done_since` that must miss none reads no nearer to now than this.
-"""
-
-
 class Run(NewRun, frozen=True, extra="ignore"):
     """A run stored in the database. `extra="ignore"`: this crosses the wire -- see `dlboard._wire`."""
 
@@ -106,9 +98,9 @@ class Run(NewRun, frozen=True, extra="ignore"):
     When the server recorded how the run ended, by its own clock: its client reporting a status it didn't have
     (`finish_run`), or its being given up as lost.
 
-    Unlike `ended_at` (a client's word, or when a lost run was last seen, either of which may be long past), it only moves
-    forward, so what ended since a moment is found by it (`DataStore.runs_done_since`). `None` while the run is running,
-    and for a run that ended before it was kept.
+    Unlike `ended_at` (a client's word, or when a lost run was last seen, either of which may be long past), it moves with
+    each end and only then, so it tells one end of a run from another: run-end work is queued by it (`RunEnded`). `None`
+    while the run is running, and for a run that ended before it was kept.
     """
 
     kept_at: AwareDatetime | None = None

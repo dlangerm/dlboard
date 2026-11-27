@@ -9,6 +9,7 @@ from __future__ import annotations
 import hmac
 import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -40,11 +41,13 @@ from dlboard.serve import app as build_app
 from dlboard.serve._custodian import get_system_task_store
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator
     from pathlib import Path
     from wsgiref.types import StartResponse, WSGIEnvironment
 
     from dash import Dash
+
+    from dlboard.models import DataStore, PluginProtocol
 
 
 @dataclass
@@ -75,19 +78,21 @@ def receiver(monkeypatch: pytest.MonkeyPatch) -> Iterator[_Receiver]:
     server.server_close()
 
 
-@pytest.fixture(autouse=True)
-def settled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every end settled as soon as it is made: a test doesn't wait out `RUN_END_SETTLES`, except the one about it."""
-    monkeypatch.setattr(models, "RUN_END_SETTLES", pendulum.duration())
+@contextmanager
+def _built(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugins: list[PluginProtocol]) -> Generator[Dash]:
+    monkeypatch.setenv("DLBOARD_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("DLBOARD_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+    built = build_app([*plugins, *LOCAL_AUTH, *BUILTIN_BACKEND])
+    try:
+        yield built
+    finally:
+        dispose_stores(built)
 
 
 @pytest.fixture
 def app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Dash]:
-    monkeypatch.setenv("DLBOARD_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("DLBOARD_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
-    built = build_app([sqlite, filesystem, webhooks_plugin, *LOCAL_AUTH, *BUILTIN_BACKEND])
-    yield built
-    dispose_stores(built)
+    with _built(tmp_path, monkeypatch, [sqlite, filesystem, webhooks_plugin]) as built:
+        yield built
 
 
 @pytest.fixture
@@ -97,7 +102,7 @@ def store(app: Dash) -> SQLStoreBase[Any]:
     return found
 
 
-def _with_hooks(store: SQLStoreBase[Any], *hooks: Webhook) -> tuple[int, int]:
+def _with_hooks(store: DataStore[...], *hooks: Webhook) -> tuple[int, int]:
     """A project with `hooks`, and its experiment."""
     project = store.create_project(models.NewProject(name="vision", description=""))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id, name="sweep"))
@@ -172,20 +177,35 @@ def test_a_run_given_up_as_lost_is_posted_as_crashed_though_it_was_heard_from_be
     assert WebhookPayload.model_validate_json(body).run.status is models.RunStatus.UNKNOWN
 
 
-def test_a_run_is_found_only_once_its_end_has_settled(
-    app: Dash, store: SQLStoreBase[Any], receiver: _Receiver, monkeypatch: pytest.MonkeyPatch
+def test_a_lost_run_heard_from_again_before_its_end_is_found_is_not_posted(
+    app: Dash, store: SQLStoreBase[Any], receiver: _Receiver
 ) -> None:
-    """One that ended within `RUN_END_SETTLES` is left for a later look, not passed over by the cursor."""
-    _, experiment_id = _with_hooks(store, _hook(receiver.url, WebhookEvent.FINISHED))
+    """Its end was undone: it is running again, and is posted when it ends for good."""
+    _, experiment_id = _with_hooks(store, _hook(receiver.url, WebhookEvent.CRASHED, WebhookEvent.FINISHED))
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    store.finish_run(run.id, models.RunStatus.FINISHED, pendulum.now("UTC"))
-    monkeypatch.setattr(models, "RUN_END_SETTLES", pendulum.duration(minutes=1))
+    store.mark_lost_runs(pendulum.now("UTC").add(seconds=1), limit=10)
+    store.heartbeat(run.id)
     _announce(app)
     assert receiver.received == []
 
-    monkeypatch.setattr(models, "RUN_END_SETTLES", pendulum.duration())
+    store.finish_run(run.id, models.RunStatus.FINISHED, pendulum.now("UTC"))
     _announce(app)
-    assert len(receiver.received) == 1
+
+    ((headers, _),) = receiver.received
+    assert headers[EVENT_HEADER] == WebhookEvent.FINISHED
+
+
+def test_every_end_is_found_when_the_plugin_is_listed_before_its_storage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The store hears which work a run's end queues once every plugin has plugged, in whatever order."""
+    with _built(tmp_path, monkeypatch, [webhooks_plugin, sqlite, filesystem]) as built:
+        store = get_system_data_store(built)
+        _, experiment_id = _with_hooks(store)
+        run = store.create_run(models.NewRun(experiment_id=experiment_id))
+        store.finish_run(run.id, models.RunStatus.FINISHED, pendulum.now("UTC"))
+
+        assert get_system_task_store(built).count_work(WebhookWork.RUN_END) == 1
 
 
 @pytest.fixture

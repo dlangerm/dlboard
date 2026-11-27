@@ -78,6 +78,14 @@ class TaskStore(Protocol):
         """Queue `items`; one already queued under its `kind` and `key` is left as it is."""
         ...
 
+    def queue_on_run_end(self, kinds: frozenset[str]) -> None:
+        """
+        From now on, queue one item of each of `kinds` for every run's end (`RunEnded`), in the transaction recording it.
+
+        An end is a run's client reporting a status it didn't have (`finish_run`), or the run being given up as lost.
+        """
+        ...
+
     def claim_work(self, kind: str, holder: str, *, limit: int, until: datetime) -> list[WorkItem]:
         """
         Claim up to `limit` of `kind`'s due items for `holder` until `until`, the longest due first.
@@ -129,6 +137,24 @@ def register_work_kind(app: Dash, rule: WorkRule) -> None:
         msg = f"Work of kind {rule.kind!r} is already registered"
         raise ValueError(msg)
     rules[str(rule.kind)] = rule
+
+
+RUN_END_WORK: AppSlot[set[str]] = AppSlot("run end work")
+
+
+def register_run_end_work(app: Dash, kind: StrEnum) -> None:
+    """
+    Queue an item of `kind` (its payload a `RunEnded`) for every run that ends, for a `SHARED` task of the plugin's.
+
+    Queued in the transaction that records the end, so every end that commits is queued, once, and no other is.
+    """
+    RUN_END_WORK.setdefault(app, set).add(str(kind))
+
+
+def connect_run_end_work(app: Dash) -> None:
+    """Tell `app`'s store what every run's end queues: by `app()`, once every plugin has plugged, in whatever order."""
+    if kinds := RUN_END_WORK.find(app):
+        get_system_task_store(app).queue_on_run_end(frozenset(kinds))
 
 
 def get_system_task_store(app: Dash | None = None) -> TaskStore:
@@ -224,6 +250,9 @@ class AuthorizingTaskStore(TaskStore):
         self._inner.enqueue_work(queued)
         for task in {rule.task for rule in rules.values()}:
             self._inner.request_task_run(task)
+
+    def queue_on_run_end(self, kinds: frozenset[str]) -> None:  # noqa: ARG002
+        _forbid("choosing what a run's end queues")
 
     def claim_work(self, kind: str, holder: str, *, limit: int, until: datetime) -> list[WorkItem]:  # noqa: ARG002
         _forbid("claiming work")

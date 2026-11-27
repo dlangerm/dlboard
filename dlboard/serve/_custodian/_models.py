@@ -73,6 +73,24 @@ class NewWorkItem(BaseModel, frozen=True, extra="forbid"):
     payload: dict[str, Any] = {}
 
 
+class RunEnded(BaseModel, frozen=True, extra="forbid"):
+    """
+    A run's end, as the store queues it for each kind of work a plugin asked for (`register_run_end_work`): the payload.
+
+    Queued in the transaction that records the end, so it is there exactly when the end is: never before it commits, and
+    never for one rolled back. By the time it is claimed the run may have been deleted, or heard from again and ended
+    another way; its `done_at` then differs from this one.
+    """
+
+    run_id: int
+    done_at: AwareDatetime
+
+    @property
+    def key(self) -> str:
+        """Unique to one end of one run: a run that ends, runs again and ends again is queued twice."""
+        return f"{self.run_id}:{self.done_at.isoformat()}"
+
+
 class WorkItem(NewWorkItem, frozen=True, extra="forbid"):
     """A queued work item, and who has claimed it until when."""
 
