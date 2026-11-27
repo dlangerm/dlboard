@@ -2938,6 +2938,7 @@
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_WEBHOOK_ATTEMPTS]": 0.0010822389886016026,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_WEBHOOK_INTERVAL_S]": 0.001102986017940566,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_WEBHOOK_MAX_PER_PROJECT]": 0.0011480800021672621,
+  "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_WEBHOOK_PUBLIC_URL]": 0.0018103239999902598,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_WEBHOOK_TIMEOUT_S]": 0.31478571900515817,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_WIDE_HISTORY_METRICS]": 0.0009905119986797217,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_WORKERS_KILL_TIMEOUT_S]": 0.0010280129972670693,
