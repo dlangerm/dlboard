@@ -88,6 +88,7 @@ Posting each run that ends to its project's webhooks: see [webhooks.md](webhooks
 | `DLBOARD_WEBHOOK_TIMEOUT_S` | `5` | How long a post waits to connect, and then for the answer. |
 | `DLBOARD_WEBHOOK_ATTEMPTS` | `10` | Tries a post gets before its webhook is turned off, spaced by the custodian's retry backoff (`DLBOARD_CUSTODIAN_RETRY_FIRST_S`, doubling): with the defaults, about eight and a half hours. |
 | `DLBOARD_WEBHOOK_INTERVAL_S` | `30` | How often the server looks for runs that ended. |
+| `DLBOARD_WEBHOOK_EXPIRE_H` | `48` | How long after a run ends its end may still be posted: one not posted by then (the server was down, or the plugin was taken off the list and is listed again) is dropped. Must be longer than `DLBOARD_WEBHOOK_ATTEMPTS` tries take, or the server doesn't start. |
 
 ## Retention
 

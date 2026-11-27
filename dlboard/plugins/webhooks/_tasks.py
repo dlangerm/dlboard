@@ -10,10 +10,14 @@ Webhooks' two background tasks: one finds what each run's end is sent, the other
   webhook off, and the project's Webhooks tab says why. A post the receiver refuses outright is dropped. Each post has
   short timeouts, and a webhook that fails once is not tried again in the same pass, so a dead endpoint holds up only
   its own deliveries.
+
+Either drops a run's end that ended more than `DLBOARD_WEBHOOK_EXPIRE_H` ago, unposted: what the server was down for, or
+what was queued before the plugin was taken off the deployment's list and has waited since for it to be listed again.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
@@ -83,8 +87,10 @@ class Delivery(BaseModel, frozen=True, extra="forbid"):
         return NewWorkItem(kind=WebhookWork.DELIVERY, key=self.key, payload=self.model_dump(mode="json"))
 
 
-def _deliveries(store: DataStore[...], ended: RunEnded) -> list[Delivery]:
+def _deliveries(store: DataStore[...], ended: RunEnded, settings: WebhookSettings) -> list[Delivery]:
     """What one end of a run is sent: a delivery for each webhook of its project that asks for how it ended."""
+    if settings.expired(ended.done_at):
+        return []
     run = store.get_run(ended.run_id)
     if (
         run is None or run.done_at != ended.done_at
@@ -108,7 +114,7 @@ def _deliveries(store: DataStore[...], ended: RunEnded) -> list[Delivery]:
 
 def find_ended_runs(ctx: TaskContext) -> None:
     """Queue a delivery for each webhook that asks for how each run whose end was queued ended."""
-    store, tasks = get_system_data_store(ctx.app), get_system_task_store(ctx.app)
+    store, tasks, settings = get_system_data_store(ctx.app), get_system_task_store(ctx.app), WebhookSettings()
     queued = 0
     while not ctx.should_stop():
         claimed = ctx.claim(WebhookWork.RUN_END, limit=_ENDS)
@@ -119,7 +125,7 @@ def find_ended_runs(ctx: TaskContext) -> None:
             found: list[WorkItem] = []
             for item in claimed:
                 try:
-                    due += _deliveries(store, RunEnded.model_validate(item.payload))
+                    due += _deliveries(store, RunEnded.model_validate(item.payload), settings)
                 except Exception as exc:  # noqa: BLE001 -- one end's failure must not hold up the others
                     _log.warning("Finding what a run's end is sent failed", exc_info=True)
                     ctx.retry(item, f"{type(exc).__name__}: {exc}")
@@ -169,38 +175,64 @@ def _post(store: DataStore[...], delivery: Delivery) -> RefusedError | None:
     return None
 
 
-def deliver(ctx: TaskContext) -> None:
-    store, attempts = get_system_data_store(ctx.app), WebhookSettings().attempts
-    down: dict[str, RefusedError] = {}
+@dataclass
+class _DeliveryPass:
+    """One run of the delivery task: what it posts with, and what it learns on the way."""
+
+    ctx: TaskContext
+    store: DataStore[...]
+    settings: WebhookSettings = field(default_factory=WebhookSettings)
+    down: dict[str, RefusedError] = field(default_factory=dict)
     """The webhooks a post failed to this run, and why: the rest of theirs wait for the next try, not posted again now."""
+    expired: int = 0
+    """Deliveries dropped unposted, their run having ended more than `DLBOARD_WEBHOOK_EXPIRE_H` ago."""
+
+    def settle(self, item: WorkItem) -> None:
+        """Post one delivery, unless it expired or its webhook failed already this run, and settle its item by how it went."""
+        ctx, store, delivery = self.ctx, self.store, Delivery.model_validate(item.payload)
+        if self.settings.expired(delivery.body.run.done_at):
+            self.expired += 1
+            ctx.done([item])
+            return
+        try:
+            refused = self.down.get(delivery.hook_id) or _post(store, delivery)
+        except Exception as exc:  # noqa: BLE001 -- one delivery's failure must not stop the others
+            _log.warning("A webhook delivery failed", exc_info=True)
+            ctx.retry(item, f"{type(exc).__name__}: {exc}")
+            return
+        match refused:
+            case None:
+                ctx.done([item])
+            case RefusedError(failure=Failure.REJECTED):
+                _log.warning(
+                    "A webhook refused a delivery; dropped it", hook_id=delivery.hook_id, why=str(refused)
+                )
+                ctx.done([item])
+            case RefusedError(failure=Failure.GONE):
+                _turn_off(store, delivery.body.project.id, delivery.hook_id, f"Turned off: {refused}")
+                ctx.done([item])
+            case RefusedError(failure=Failure.RETRY) if item.attempts >= self.settings.attempts:
+                why = f"Turned off after {item.attempts} failed deliveries: {refused}"
+                _turn_off(store, delivery.body.project.id, delivery.hook_id, why)
+                ctx.done([item])
+            case RefusedError(failure=Failure.RETRY):
+                self.down[delivery.hook_id] = refused
+                ctx.retry(item, str(refused))
+
+
+def deliver(ctx: TaskContext) -> None:
+    """Post the deliveries that are due, a batch at a time."""
+    this_pass = _DeliveryPass(ctx, get_system_data_store(ctx.app))
     while not ctx.should_stop():
         claimed = ctx.claim(WebhookWork.DELIVERY, limit=_DELIVERIES)
         if not claimed:
             break
         for item in claimed:
-            delivery = Delivery.model_validate(item.payload)
-            try:
-                refused = down.get(delivery.hook_id) or _post(store, delivery)
-            except Exception as exc:  # noqa: BLE001 -- one delivery's failure must not stop the others
-                _log.warning("A webhook delivery failed", exc_info=True)
-                ctx.retry(item, f"{type(exc).__name__}: {exc}")
-                continue
-            match refused:
-                case None:
-                    ctx.done([item])
-                case RefusedError(failure=Failure.REJECTED):
-                    _log.warning(
-                        "A webhook refused a delivery; dropped it", hook_id=delivery.hook_id, why=str(refused)
-                    )
-                    ctx.done([item])
-                case RefusedError(failure=Failure.GONE):
-                    _turn_off(store, delivery.body.project.id, delivery.hook_id, f"Turned off: {refused}")
-                    ctx.done([item])
-                case RefusedError(failure=Failure.RETRY) if item.attempts >= attempts:
-                    why = f"Turned off after {item.attempts} failed deliveries: {refused}"
-                    _turn_off(store, delivery.body.project.id, delivery.hook_id, why)
-                    ctx.done([item])
-                case RefusedError(failure=Failure.RETRY):
-                    down[delivery.hook_id] = refused
-                    ctx.retry(item, str(refused))
+            this_pass.settle(item)
+    if this_pass.expired:
+        _log.warning(
+            "Dropped webhook deliveries of runs that ended too long ago to post",
+            dropped=this_pass.expired,
+            expire_h=this_pass.settings.expire_h,
+        )
     ctx.report(backlog=get_system_task_store(ctx.app).count_work(WebhookWork.DELIVERY))

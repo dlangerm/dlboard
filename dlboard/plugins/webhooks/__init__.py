@@ -7,6 +7,9 @@ plugin owns every opinion about it: the events, the payload, the signature, whic
 plugin-owned scoped settings (`register_setting`), a tab on the project page (`register_project_tab`), background tasks
 (`register_task`), and each run's end, queued for it as the end is recorded (`register_run_end_work`): one row
 in the transaction that ends the run is all a run's end costs. Delivery is work nobody waits on, done by the custodian.
+
+A run's end is posted within `DLBOARD_WEBHOOK_EXPIRE_H` of when it ended, or never. That is what keeps work queued
+before the plugin was taken off a deployment's list from being posted, long after, once it is listed again (#813).
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ from dlboard.serve import (
     register_setting,
     register_task,
 )
+from dlboard.serve._custodian import CustodianSettings
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -41,8 +45,10 @@ if TYPE_CHECKING:
 
 def plug(app: Dash) -> None:
     """Register the webhooks setting (an owner's alone, secrets and all), the two tasks, and the project page's tab."""
+    settings = WebhookSettings()
+    settings.check_expiry(CustodianSettings().backoff)
     register_setting(app, SettingRule(key=WebhookKey.HOOKS, read=ProjectRole.OWNER, check=checked))
-    every = pendulum.duration(seconds=WebhookSettings().interval_s)
+    every = pendulum.duration(seconds=settings.interval_s)
     register_run_end_work(app, WebhookWork.RUN_END)
     register_task(
         app, Task(name=WebhookTask.FIND, run_once=find_ended_runs, every=every, mode=TaskMode.SHARED)

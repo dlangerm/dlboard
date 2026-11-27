@@ -17,7 +17,9 @@ from dlboard.serve._custodian._store import (
     register_run_end_work,
     register_work_kind,
 )
+from dlboard.serve._custodian._supervisor import CustodianSettings
 from dlboard.serve._custodian._task import (
+    Backoff,
     Task,
     TaskContext,
     TaskMode,
@@ -26,6 +28,8 @@ from dlboard.serve._custodian._task import (
 )
 
 __all__ = [
+    "Backoff",
+    "CustodianSettings",
     "NewWorkItem",
     "RunEnded",
     "Task",

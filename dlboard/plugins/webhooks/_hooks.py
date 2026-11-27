@@ -50,6 +50,8 @@ from dlboard.serve import CommaSeparated
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from dlboard.serve._custodian import Backoff
+
 SIGNATURE_HEADER: Final = "X-Dlboard-Signature"
 EVENT_HEADER: Final = "X-Dlboard-Event"
 DELIVERY_HEADER: Final = "X-Dlboard-Delivery"
@@ -124,6 +126,27 @@ class WebhookSettings(BaseSettings):
     """Tries a delivery gets, spaced by the custodian's `Backoff`, before its webhook is turned off."""
     interval_s: PositiveInt = 30
     """How often the server looks for runs' ends to announce, and for deliveries to try again."""
+    expire_h: PositiveFloat = 48
+    """
+    How long after a run ends its end may still be posted. One that hasn't been by then (the server was down, or the
+    plugin was taken off the deployment's list and is listed again) is dropped, never posted that late.
+    """
+
+    def expired(self, done_at: AwareDatetime) -> bool:
+        """Whether a run's end, recorded at `done_at`, is too old to post."""
+        return pendulum.instance(done_at) + pendulum.duration(hours=self.expire_h) < pendulum.now(
+            pendulum.UTC
+        )
+
+    def check_expiry(self, backoff: Backoff) -> None:
+        """Refuse an expiry a delivery's tries outlast: a webhook that keeps failing must be turned off, not go quiet."""
+        tried_for = backoff.total(self.attempts)
+        if tried_for >= pendulum.duration(hours=self.expire_h):
+            msg = (
+                f"DLBOARD_WEBHOOK_EXPIRE_H ({self.expire_h:g}) must be longer than DLBOARD_WEBHOOK_ATTEMPTS "
+                f"({self.attempts}) tries take with the custodian's retry backoff ({tried_for.in_words()})"
+            )
+            raise ValueError(msg)
 
     @field_validator("allowed_hosts", mode="after")
     @classmethod

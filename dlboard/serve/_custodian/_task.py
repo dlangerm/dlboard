@@ -114,6 +114,10 @@ class Backoff:
         doubled = self.first.total_seconds() * 2.0 ** min(max(attempts - 1, 0), 64)
         return pendulum.duration(seconds=min(doubled, self.most.total_seconds()))
 
+    def total(self, attempts: int) -> pendulum.Duration:
+        """How long an item that fails every time waits in all, from its first try to its `attempts`-th."""
+        return sum((self.after(tried) for tried in range(1, attempts)), pendulum.duration())
+
 
 _PACE_HISTORY: Final = 20
 """How many of a task's latest batches its pacing compares a batch with."""

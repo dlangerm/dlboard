@@ -20,7 +20,7 @@ from werkzeug.serving import make_server
 from werkzeug.wrappers import Request
 
 from dlboard import models
-from dlboard.conftest import dispose_stores, run_task
+from dlboard.conftest import Clock, dispose_stores, run_task
 from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dlboard.plugins import webhooks as webhooks_plugin
 from dlboard.plugins.data_stores import filesystem, sqlite
@@ -34,6 +34,7 @@ from dlboard.plugins.webhooks._hooks import (
     WebhookEvent,
     WebhookKey,
     WebhookPayload,
+    WebhookSettings,
 )
 from dlboard.plugins.webhooks._tasks import WebhookTask, WebhookWork
 from dlboard.serve import SQLStoreBase, get_system_data_store
@@ -271,3 +272,38 @@ def test_a_run_that_ended_before_its_webhook_was_made_is_not_posted(
     _announce(app)
 
     assert receiver.received == []
+
+
+@pytest.mark.parametrize(
+    "found_first", [True, False], ids=["delivery-queued-then-waited", "end-waited-to-be-found"]
+)
+def test_a_run_that_ended_longer_ago_than_the_expiry_is_never_posted(
+    app: Dash, store: SQLStoreBase[Any], receiver: _Receiver, clock: Clock, *, found_first: bool
+) -> None:
+    """What the server was down for, or was queued before the plugin was taken off the list and listed again (#813)."""
+    project_id, experiment_id = _with_hooks(store, _hook(receiver.url, WebhookEvent.FINISHED))
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.finish_run(run.id, models.RunStatus.FINISHED, pendulum.now("UTC"))
+    if found_first:
+        run_task(app, WebhookTask.FIND)
+
+    clock.advance(hours=WebhookSettings().expire_h, minutes=1)
+    _announce(app)
+
+    assert receiver.received == []
+    assert _stored_hook(store, project_id).turned_off is None
+    tasks = get_system_task_store(app)
+    assert (tasks.count_work(WebhookWork.RUN_END), tasks.count_work(WebhookWork.DELIVERY)) == (0, 0)
+
+
+def test_the_server_does_not_start_with_an_expiry_a_failing_webhooks_tries_outlast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Its deliveries would expire before the webhook is turned off: it would go quiet, not say why."""
+    monkeypatch.setenv("DLBOARD_WEBHOOK_EXPIRE_H", "8")  # ten tries take about eight and a half hours
+
+    with (
+        pytest.raises(ValueError, match="DLBOARD_WEBHOOK_EXPIRE_H"),
+        _built(tmp_path, monkeypatch, [sqlite, filesystem, webhooks_plugin]),
+    ):
+        pass
