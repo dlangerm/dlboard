@@ -172,12 +172,9 @@ class ProjectWebhooks(BaseModel, frozen=True, extra="forbid"):
         return ProjectWebhooks(hooks=tuple(h for h in kept if h is not None))
 
 
-class ProjectRef(BaseModel, frozen=True, extra="forbid"):
-    id: int
-    name: str
+class Named(BaseModel, frozen=True, extra="forbid"):
+    """A project or experiment, as a post names it."""
 
-
-class ExperimentRef(BaseModel, frozen=True, extra="forbid"):
     id: int
     name: str | None
 
@@ -190,6 +187,9 @@ class RunSummary(BaseModel, frozen=True, extra="forbid"):
     status: models.RunStatus | None
     created_at: AwareDatetime
     ended_at: AwareDatetime | None
+    """When the run ended, by its client's word (or when a lost run was last heard from)."""
+    done_at: AwareDatetime
+    """When the server recorded the end: unique to one end of the run."""
     duration_s: float | None
 
 
@@ -203,16 +203,17 @@ class WebhookPayload(BaseModel, frozen=True, extra="forbid"):
 
     event: WebhookEvent
     text: str
-    project: ProjectRef
-    experiment: ExperimentRef
+    project: Named
+    experiment: Named
     run: RunSummary
     url: HttpUrl
 
     @classmethod
-    def of(
+    def of(  # noqa: PLR0913 -- the event, what it is of, when, and where its link points
         cls,
         event: WebhookEvent,
         run: models.Run,
+        done_at: AwareDatetime,
         experiment: models.Experiment,
         project: models.Project,
         link_base: HttpUrl,
@@ -228,14 +229,15 @@ class WebhookPayload(BaseModel, frozen=True, extra="forbid"):
         return cls(
             event=event,
             text=f"{run.name or f'Run {run.id}'} {event.verb}{after}, in {where}: {link}",
-            project=ProjectRef(id=project.id, name=project.name),
-            experiment=ExperimentRef(id=experiment.id, name=experiment.name),
+            project=Named(id=project.id, name=project.name),
+            experiment=Named(id=experiment.id, name=experiment.name),
             run=RunSummary(
                 id=run.id,
                 name=run.name,
                 status=run.status,
                 created_at=run.created_at,
                 ended_at=run.ended_at,
+                done_at=done_at,
                 duration_s=took,
             ),
             url=link,

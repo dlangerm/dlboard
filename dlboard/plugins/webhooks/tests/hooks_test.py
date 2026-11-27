@@ -17,9 +17,8 @@ from werkzeug.serving import make_server
 
 from dlboard import models
 from dlboard.plugins.webhooks._hooks import (
-    ExperimentRef,
     Failure,
-    ProjectRef,
+    Named,
     ProjectWebhooks,
     RefusedError,
     RunSummary,
@@ -179,10 +178,16 @@ def test_a_post_over_https_goes_to_the_checked_address_and_checks_the_certificat
     payload = WebhookPayload(
         event=WebhookEvent.FINISHED,
         text="r finished",
-        project=ProjectRef(id=1, name="p"),
-        experiment=ExperimentRef(id=1, name=None),
+        project=Named(id=1, name="p"),
+        experiment=Named(id=1, name=None),
         run=RunSummary(
-            id=1, name=None, status=None, created_at=pendulum.now("UTC"), ended_at=None, duration_s=None
+            id=1,
+            name=None,
+            status=None,
+            created_at=pendulum.now("UTC"),
+            ended_at=None,
+            done_at=pendulum.now("UTC"),
+            duration_s=None,
         ),
         url=HttpUrl("https://d/experiment/1?run=1"),
     )
