@@ -5,8 +5,8 @@ Webhooks' two background tasks: one finds what each run's end is sent, the other
   (`register_run_end_work`), and queues a delivery, its body made then, for each webhook of the run's project that asks
   for how it ended. An end is queued in the transaction that records it, so every end that commits is found, once, with
   no cursor and no wait for slower transactions. One whose run was deleted, or heard from again, by then is dropped.
-- **Delivering** (any custodian, a few deliveries at a time) posts each one. One that fails is tried again later (a
-  minute, doubling); one that has failed `DLBOARD_WEBHOOK_ATTEMPTS` times, or that the receiver says is gone, turns its
+- **Delivering** (any custodian, a few deliveries at a time) posts each one. One that fails is tried again later (the
+  custodian's `Backoff`); one that has failed `DLBOARD_WEBHOOK_ATTEMPTS` times, or that the receiver says is gone, turns its
   webhook off, and the project's Webhooks tab says why. A post the receiver refuses outright is dropped. Each post has
   short timeouts, and a webhook that fails once is not tried again in the same pass, so a dead endpoint holds up only
   its own deliveries.

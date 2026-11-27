@@ -29,7 +29,7 @@ from dlboard._compat import StrEnum
 from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, span
 from dlboard.serve._custodian._models import TaskOutcome
-from dlboard.serve._custodian._task import Task, TaskContext, TaskMode
+from dlboard.serve._custodian._task import Backoff, Task, TaskContext, TaskMode
 from dlboard.serve.telemetry import AttributeKey, Counter, Histogram, NoAttributes, Unit, UpDownCounter
 
 if TYPE_CHECKING:
@@ -63,6 +63,17 @@ class CustodianSettings(BaseSettings):
     """The share of time a task may spend in a batch of work: after one, it waits for the rest."""
     claim_s: PositiveInt = 300
     """How long a claim on a work item lasts: one whose custodian died is claimed again after this."""
+    retry_first_s: PositiveFloat = 60
+    """How long a work item that failed waits before its second try; each try after waits twice the one before."""
+    retry_max_s: PositiveFloat = 24 * 60 * 60
+    """The longest a work item that failed waits before its next try, however many it has had."""
+
+    @property
+    def backoff(self) -> Backoff:
+        """When a work item that failed is tried again."""
+        return Backoff(
+            pendulum.duration(seconds=self.retry_first_s), pendulum.duration(seconds=self.retry_max_s)
+        )
 
 
 class ExitCode(IntEnum):
@@ -179,6 +190,7 @@ class _Runner:
             cancel,
             duty_cycle=supervisor.settings.duty_cycle,
             claim_for=pendulum.duration(seconds=supervisor.settings.claim_s),
+            backoff=supervisor.settings.backoff,
         )
         store.start_task_run(task.name)
         started = self.running_since = time.monotonic()

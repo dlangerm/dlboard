@@ -121,7 +121,7 @@ class WebhookSettings(BaseSettings):
     timeout_s: PositiveFloat = 5.0
     """How long a delivery waits to connect, and then for the answer."""
     attempts: PositiveInt = 10
-    """Tries a delivery gets (a minute apart, doubling) before its webhook is turned off: about eight and a half hours."""
+    """Tries a delivery gets, spaced by the custodian's `Backoff`, before its webhook is turned off."""
     interval_s: PositiveInt = 30
     """How often the server looks for runs' ends to announce, and for deliveries to try again."""
 

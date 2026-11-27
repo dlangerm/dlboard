@@ -101,6 +101,20 @@ def registered_tasks(app: Dash) -> list[Task]:
     return list(TASKS.find(app) or [])
 
 
+@dataclass(frozen=True)
+class Backoff:
+    """How long a work item that failed waits before its next try: `first`, doubling with each try, up to `most`."""
+
+    first: pendulum.Duration
+    most: pendulum.Duration
+
+    def after(self, attempts: int) -> pendulum.Duration:
+        """The wait after an item's `attempts`-th try failed."""
+        # The exponent stops growing long after any wait reaches `most`, so a float can always hold it.
+        doubled = self.first.total_seconds() * 2.0 ** min(max(attempts - 1, 0), 64)
+        return pendulum.duration(seconds=min(doubled, self.most.total_seconds()))
+
+
 _PACE_HISTORY: Final = 20
 """How many of a task's latest batches its pacing compares a batch with."""
 _PACE_HISTORY_MIN: Final = 3
@@ -122,6 +136,7 @@ class TaskContext:
         *,
         duty_cycle: float,
         claim_for: pendulum.Duration,
+        backoff: Backoff,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.app = app
@@ -131,6 +146,7 @@ class TaskContext:
         self._stop = stop
         self._duty_cycle = duty_cycle
         self._claim_for = claim_for
+        self._backoff = backoff
         self._clock = clock
         """What batches and the run's budget are timed by, in seconds. Monotonic, not the wall clock, which a synced machine steps; a test hands it its own."""
         self._batches: deque[float] = deque(maxlen=_PACE_HISTORY)
@@ -172,9 +188,10 @@ class TaskContext:
         self._store.complete_work([item.id for item in items])
 
     def retry(self, item: WorkItem, error: str) -> None:
-        """Let an item that failed go, to be tried again later: a minute, doubling with each attempt, up to a day."""
-        wait = pendulum.duration(minutes=min(2 ** max(item.attempts - 1, 0), 24 * 60))
-        self._store.retry_work(item.id, error=error, due_at=pendulum.now(pendulum.UTC) + wait)
+        """Let an item that failed go, to be tried again after the custodian's `Backoff` for its attempts so far."""
+        self._store.retry_work(
+            item.id, error=error, due_at=pendulum.now(pendulum.UTC) + self._backoff.after(item.attempts)
+        )
 
     @contextmanager
     def batch(self) -> Generator[None]:

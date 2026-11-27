@@ -31,7 +31,7 @@ Each server starts its own custodian, and they divide what there is to do throug
   A run whose lease was taken over (its custodian stalled past it) is told to stop, `ctx.should_stop()` turning true, so a task that checks it between batches never overlaps the one that took over.
 - A task whose work divides (`SHARED`: purging, retention's checks) is a queue of work items.
   Each custodian claims a small batch at a time, with `FOR UPDATE SKIP LOCKED` on Postgres, so custodians skip each other's rows instead of waiting for them, and more custodians drain more.
-  A custodian that is working renews its claims every beat, so a long run is never claimed twice; an item whose custodian dies is claimed again after `DLBOARD_CUSTODIAN_CLAIM_S`, and one that fails is retried with a backoff from a minute up to a day.
+  A custodian that is working renews its claims every beat, so a long run is never claimed twice; an item whose custodian dies is claimed again after `DLBOARD_CUSTODIAN_CLAIM_S`, and one that fails is retried with a backoff from a minute (`DLBOARD_CUSTODIAN_RETRY_FIRST_S`), doubling, up to a day (`DLBOARD_CUSTODIAN_RETRY_MAX_S`).
 - SQLite has one writer whatever the number of custodians: more servers on one SQLite database add no throughput.
   More than one server is a Postgres deployment.
 

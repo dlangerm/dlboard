@@ -327,6 +327,7 @@ def test_each_batch_rests_for_the_one_before_it_to_keep_the_task_to_its_share_of
         stop,
         duty_cycle=duty_cycle,
         claim_for=pendulum.duration(minutes=1),
+        backoff=CustodianSettings().backoff,
         clock=clock,
     )
     for took in (0.01, 0.01, 0.01, 0.2, 0.01):
@@ -357,6 +358,7 @@ def test_a_run_is_told_to_stop_once_it_has_used_its_share_of_the_tasks_timeout(
         threading.Event(),
         duty_cycle=1.0,
         claim_for=pendulum.duration(minutes=1),
+        backoff=CustodianSettings().backoff,
         clock=clock,
     )
     assert not ctx.should_stop()

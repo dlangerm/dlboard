@@ -20,6 +20,7 @@ from dlboard.serve import get_system_artifact_store, get_system_data_store
 from dlboard.serve._backend._purge_work import PurgeWork, entity_purge
 from dlboard.serve._custodian import TaskContext, get_system_task_store, registered_tasks
 from dlboard.serve._custodian._store import WORK_RULES, AuthorizingTaskStore
+from dlboard.serve._custodian._supervisor import CustodianSettings
 from dlboard.serve.telemetry._prometheus import serve_metrics
 
 if TYPE_CHECKING:
@@ -168,6 +169,7 @@ def test_a_purge_the_run_has_no_time_for_goes_on_in_a_later_run_and_is_not_count
             threading.Event(),
             duty_cycle=1.0,
             claim_for=pendulum.duration(minutes=5),
+            backoff=CustodianSettings().backoff,
         )
     )
 

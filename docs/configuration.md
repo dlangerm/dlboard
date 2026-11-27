@@ -71,6 +71,8 @@ Every server sharing a database starts one, and they share the work through the 
 | `DLBOARD_CUSTODIAN_STARTUP_S` | `600.0` | How long a custodian may take to start (build the app, and migrate the database if it is first) before the server takes it for hung. |
 | `DLBOARD_CUSTODIAN_DUTY_CYCLE` | `0.25` | The share of time a task may spend in a batch of work: after one that took `t`, it waits `t * (1 - d) / d`, so it takes at most this share of the database's time, and less when the database is busy. |
 | `DLBOARD_CUSTODIAN_CLAIM_S` | `300` | How long a claim on a work item lasts: an item whose custodian died is claimed again after this. |
+| `DLBOARD_CUSTODIAN_RETRY_FIRST_S` | `60` | How long a work item that failed (a purge, a webhook's post) waits before its second try; each try after waits twice as long as the one before. |
+| `DLBOARD_CUSTODIAN_RETRY_MAX_S` | `86400` | The longest a work item that failed waits before its next try, however many it has had. |
 | `DLBOARD_TRASH_RETENTION_DAYS` | `30` | How long anything stays in the Trash, restorable, before it is purged for good, whoever deleted it. Counted from no earlier than the first time the server checks, so what was in the Trash before an upgrade is not purged the moment it lands. |
 | `DLBOARD_LOST_RUN_AFTER_S` | `600` | How long a running run may go unheard from -- no batch, no heartbeat -- before it is given up as lost: *unknown*, ended when it was last heard from. At least 180. Heard from again, it runs again. See [client.md](client.md). |
 
@@ -84,7 +86,7 @@ Posting each run that ends to its project's webhooks: see [webhooks.md](webhooks
 | `DLBOARD_WEBHOOK_PUBLIC_URL` | none | Where people reach the server (`https://dlboard.example.com`), for the links in what a webhook posts; unset, each webhook's links use the address its owner reached the server at. |
 | `DLBOARD_WEBHOOK_MAX_PER_PROJECT` | `10` | The most webhooks a project has. |
 | `DLBOARD_WEBHOOK_TIMEOUT_S` | `5` | How long a post waits to connect, and then for the answer. |
-| `DLBOARD_WEBHOOK_ATTEMPTS` | `10` | Tries a post gets, a minute apart and doubling, before its webhook is turned off: about eight and a half hours. |
+| `DLBOARD_WEBHOOK_ATTEMPTS` | `10` | Tries a post gets before its webhook is turned off, spaced by the custodian's retry backoff (`DLBOARD_CUSTODIAN_RETRY_FIRST_S`, doubling): with the defaults, about eight and a half hours. |
 | `DLBOARD_WEBHOOK_INTERVAL_S` | `30` | How often the server looks for runs that ended. |
 
 ## Retention

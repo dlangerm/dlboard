@@ -47,6 +47,7 @@ from dlboard.serve._backend import _auth, _sql
 from dlboard.serve._backend._data_store import ARTIFACT_STORE
 from dlboard.serve._backend._metric_frame import MetricFrame
 from dlboard.serve._custodian import TaskContext, get_system_task_store, registered_tasks
+from dlboard.serve._custodian._supervisor import CustodianSettings
 from dlboard.serve._pages._experiment._panel_data import PanelData, WideHistory
 from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
@@ -678,6 +679,7 @@ def run_task(app: Dash, name: StrEnum) -> None:
             threading.Event(),
             duty_cycle=1.0,
             claim_for=pendulum.duration(minutes=5),
+            backoff=CustodianSettings().backoff,
         )
     )
 

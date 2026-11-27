@@ -19,8 +19,8 @@ Each project's owners set its webhooks on the project page's **Webhooks** tab, e
   It looks only at runs that ended at least a minute ago, so a run whose end was still being saved is never passed over: a post comes a minute or two after the run ends.
   A run that reports the same end twice (Lightning does, after `fit` and after `test`) is posted once; a run that ended before a webhook was added is not posted to it.
   Posting is done by the [custodian](background-tasks.md), so training never waits on it.
-- **Retries:** a post that may land later (no answer within 5 seconds, a 408, a 429 or a 5xx) is tried again a minute later, then two, four, and so on.
-  After 10 tries, about eight and a half hours (`DLBOARD_WEBHOOK_ATTEMPTS`), the webhook is turned off, and its tab says why; **Turn on** turns it back on.
+- **Retries:** a post that may land later (no answer within 5 seconds, a 408, a 429 or a 5xx) is tried again a minute later, then two, four, and so on (`DLBOARD_CUSTODIAN_RETRY_FIRST_S`, up to `DLBOARD_CUSTODIAN_RETRY_MAX_S`).
+  After 10 tries (`DLBOARD_WEBHOOK_ATTEMPTS`), with the defaults about eight and a half hours, the webhook is turned off, and its tab says why; **Turn on** turns it back on.
   A 404 or 410 says the endpoint is gone (a deleted Slack webhook answers so), and turns the webhook off at once.
   Any other answer that isn't a 2xx (a 400, a 403, a redirect) refuses that one post, which would be refused again: it is dropped, and the webhook stays on.
   Runs that end while a webhook is off are not sent to it, then or once it is turned on again.
