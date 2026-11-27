@@ -85,16 +85,13 @@ class _FindProgress(BaseModel, frozen=True, extra="forbid"):
 class Delivery(BaseModel, frozen=True, extra="forbid"):
     """One webhook to post one run's end to, with the body it is posted, made as the end was found."""
 
-    project_id: int
     hook_id: str
-    run_id: int
-    done_at: AwareDatetime
     body: WebhookPayload
 
     @property
     def key(self) -> str:
         """Unique to one end of one run for one webhook: a run ending once is queued once."""
-        return f"{self.hook_id}:{self.run_id}:{self.done_at.isoformat()}"
+        return f"{self.hook_id}:{self.body.run.id}:{self.body.run.done_at.isoformat()}"
 
     def queued(self) -> NewWorkItem:
         return NewWorkItem(kind=WebhookWork.DELIVERY, key=self.key, payload=self.model_dump(mode="json"))
@@ -115,14 +112,10 @@ def _deliveries(
     projects = {p: store.get_project(p) for p in {e.project_id for e in experiments.values()}}
     return [
         Delivery(
-            project_id=project.id,
-            hook_id=hook.id,
-            run_id=run.id,
-            done_at=run.done_at,
-            body=WebhookPayload.of(event, run, experiment, project, hook.link_base),
+            hook_id=hook.id, body=WebhookPayload.of(event, run, done_at, experiment, project, hook.link_base)
         )
         for run in runs
-        if run.done_at is not None
+        if (done_at := run.done_at) is not None
         and (event := WebhookEvent.of(run)) is not None
         and (experiment := experiments.get(run.experiment_id)) is not None
         and (project := projects[experiment.project_id]) is not None
@@ -189,7 +182,7 @@ def _turn_off(store: DataStore[...], project_id: int, hook_id: str, why: str) ->
 
 def _post(store: DataStore[...], delivery: Delivery) -> RefusedError | None:
     """Post one delivery, if its webhook is still there and on; why not, if it didn't land."""
-    found = store.get_scoped_settings(WebhookKey.HOOKS, delivery.project_id).project
+    found = store.get_scoped_settings(WebhookKey.HOOKS, delivery.body.project.id).project
     hook = ProjectWebhooks.model_validate(found.value).find(delivery.hook_id) if found is not None else None
     if hook is None or hook.turned_off is not None:
         return None
@@ -225,11 +218,11 @@ def deliver(ctx: TaskContext) -> None:
                     )
                     ctx.done([item])
                 case RefusedError(failure=Failure.GONE):
-                    _turn_off(store, delivery.project_id, delivery.hook_id, f"Turned off: {refused}")
+                    _turn_off(store, delivery.body.project.id, delivery.hook_id, f"Turned off: {refused}")
                     ctx.done([item])
                 case RefusedError(failure=Failure.RETRY) if item.attempts >= attempts:
                     why = f"Turned off after {item.attempts} failed deliveries: {refused}"
-                    _turn_off(store, delivery.project_id, delivery.hook_id, why)
+                    _turn_off(store, delivery.body.project.id, delivery.hook_id, why)
                     ctx.done([item])
                 case RefusedError(failure=Failure.RETRY):
                     down[delivery.hook_id] = refused

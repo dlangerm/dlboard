@@ -34,12 +34,13 @@ Each project's owners set its webhooks on the project page's **Webhooks** tab, e
   "text": "lr-3e-4 finished after 2 hours 14 minutes, in vision / sweep: https://dlboard.example/experiment/12?run=345",
   "project": {"id": 3, "name": "vision"},
   "experiment": {"id": 12, "name": "sweep"},
-  "run": {"id": 345, "name": "lr-3e-4", "status": "finished", "created_at": "...", "ended_at": "...", "duration_s": 8040.0},
+  "run": {"id": 345, "name": "lr-3e-4", "status": "finished", "created_at": "...", "ended_at": "...", "done_at": "...", "duration_s": 8040.0},
   "url": "https://dlboard.example/experiment/12?run=345"
 }
 ```
 
 `event` is `run.finished`, `run.failed`, `run.crashed` or `run.ended`, and also sent as the `X-Dlboard-Event` header.
+`run.ended_at` is when the run ended by its own word (for a crashed run, when it was last heard from); `run.done_at` is when the server recorded the end.
 `text` says it all in a sentence, which is all a Slack incoming webhook reads, so a Slack webhook URL works as it is.
 The links start with `DLBOARD_WEBHOOK_PUBLIC_URL` if an admin set it, and otherwise with the server's address as the owner who added the webhook reached it.
 
