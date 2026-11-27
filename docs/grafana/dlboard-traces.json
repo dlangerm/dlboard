@@ -49,7 +49,7 @@
       "targets": [
         {
           "limit": 20,
-          "query": "{ resource.service.name = \"dlboard\" && status = error }",
+          "query": "{ resource.service.name = \"$service\" && status = error }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -90,7 +90,7 @@
       "targets": [
         {
           "limit": 20,
-          "query": "{ resource.service.name = \"dlboard\" && name = \"dlboard.blob.ingest\" && duration > 1s }",
+          "query": "{ resource.service.name = \"$service\" && name = \"dlboard.blob.ingest\" && duration > 1s }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -118,7 +118,7 @@
       "targets": [
         {
           "limit": 20,
-          "query": "{ resource.service.name = \"dlboard\" && name = \"dlboard.store.commit\" && duration > 500ms }",
+          "query": "{ resource.service.name = \"$service\" && name = \"dlboard.store.commit\" && duration > 500ms }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -146,7 +146,7 @@
       "targets": [
         {
           "limit": 20,
-          "query": "{ resource.service.name = \"dlboard\" && name = \"POST /_dash-update-component\" && duration > 2s }",
+          "query": "{ resource.service.name = \"$service\" && name = \"POST /_dash-update-component\" && duration > 2s }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -174,7 +174,7 @@
       "targets": [
         {
           "limit": 20,
-          "query": "{ resource.service.name = \"dlboard\" && name = \"dlboard.panel.read\" && duration > 1s }",
+          "query": "{ resource.service.name = \"$service\" && name = \"dlboard.panel.read\" && duration > 1s }",
           "queryType": "traceql",
           "refId": "A"
         }
@@ -189,7 +189,19 @@
     "dlboard"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {
+          "text": "dlboard",
+          "value": "dlboard"
+        },
+        "description": "The dlboard server's OTEL_SERVICE_NAME: dlboard unless it sets one. Servers sharing one are told apart by giving each its own.",
+        "label": "Service",
+        "name": "service",
+        "query": "dlboard",
+        "type": "textbox"
+      }
+    ]
   },
   "time": {
     "from": "now-6h",

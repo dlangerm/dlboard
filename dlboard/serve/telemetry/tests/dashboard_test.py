@@ -37,10 +37,19 @@ class _Panel(BaseModel):
     targets: list[_Target] = []
 
 
+class _Variable(BaseModel):
+    name: str
+
+
+class _Templating(BaseModel):
+    list: list[_Variable]
+
+
 class _Dashboard(BaseModel):
     """The part of an exported Grafana dashboard this test reads."""
 
     panels: list[_Panel]
+    templating: _Templating
 
 
 def _defined_instruments() -> dict[str, _Instrument[Any]]:
@@ -116,3 +125,25 @@ def test_every_query_reads_a_series_that_is_served(served: dict[str, set[str]]) 
     unserved = {token for token in _queried() if re.match(r"(dlboard|http)_", token)} - every_series
 
     assert unserved == set()
+
+
+_CHOSEN_SERVER = 'job=~"$job", deployment_environment=~"$environment"'
+"""What every series a query reads is matched by: the dashboard's Service and Environment variables."""
+
+
+def test_every_query_reads_only_the_server_the_dashboard_shows() -> None:
+    """Never another service's `http_server_*`, or another deployment's dlboard under the same service name."""
+    dashboard = _Dashboard.model_validate_json(_DASHBOARD.read_text())
+    exprs = [target.expr for panel in dashboard.panels for target in panel.targets]
+
+    unmatched = {
+        series
+        for expr in exprs
+        for series, matchers in re.findall(
+            r"((?:dlboard|http)_[a-z_]+)(\{[^}]*\})?", re.sub(r"by \([^)]*\)", "", expr)
+        )
+        if not matchers.startswith("{" + _CHOSEN_SERVER)
+    }
+
+    assert unmatched == set()
+    assert {variable.name for variable in dashboard.templating.list} == {"job", "environment"}

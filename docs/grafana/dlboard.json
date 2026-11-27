@@ -71,7 +71,7 @@
       },
       "targets": [
         {
-          "expr": "sum(dlboard_server_workers)",
+          "expr": "sum(dlboard_server_workers{job=~\"$job\", deployment_environment=~\"$environment\"})",
           "refId": "A"
         }
       ],
@@ -105,7 +105,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_server_request_duration_seconds_count[$__rate_interval]))",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "refId": "A"
         }
       ],
@@ -157,7 +157,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_request_duration_seconds_count[$__rate_interval]))",
+          "expr": "sum(rate(http_server_request_duration_seconds_count{job=~\"$job\", deployment_environment=~\"$environment\", http_response_status_code=~\"5..\"}[$__rate_interval])) / sum(rate(http_server_request_duration_seconds_count{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "refId": "A"
         }
       ],
@@ -191,7 +191,7 @@
       },
       "targets": [
         {
-          "expr": "sum(http_server_active_requests)",
+          "expr": "sum(http_server_active_requests{job=~\"$job\", deployment_environment=~\"$environment\"})",
           "refId": "A"
         }
       ],
@@ -219,7 +219,7 @@
       "id": 6,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, http_route, http_request_method) (rate(http_server_request_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, http_route, http_request_method) (rate(http_server_request_duration_seconds_bucket{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval])))",
           "legendFormat": "{{http_request_method}} {{http_route}}",
           "refId": "A"
         }
@@ -247,7 +247,7 @@
       "id": 7,
       "targets": [
         {
-          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count[$__rate_interval]))",
+          "expr": "sum by (http_response_status_code) (rate(http_server_request_duration_seconds_count{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{http_response_status_code}}",
           "refId": "A"
         }
@@ -288,7 +288,7 @@
       "id": 9,
       "targets": [
         {
-          "expr": "sum(rate(dlboard_ingest_metric_values_total[$__rate_interval]))",
+          "expr": "sum(rate(dlboard_ingest_metric_values_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "metric values",
           "refId": "A"
         }
@@ -329,12 +329,12 @@
       "id": 10,
       "targets": [
         {
-          "expr": "sum(rate(dlboard_ingest_artifacts_total[$__rate_interval]))",
+          "expr": "sum(rate(dlboard_ingest_artifacts_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "artifacts per second",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(dlboard_ingest_artifact_size_bytes_total[$__rate_interval]))",
+          "expr": "sum(rate(dlboard_ingest_artifact_size_bytes_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "bytes per second",
           "refId": "B"
         }
@@ -360,55 +360,67 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "queue_full, writer_down or failed. Any sustained rate here means the artifact writer is behind or down. Uploads held (right axis) climbing towards the workers' limit comes first; held with nothing arriving, the store is refusing writes.",
+      "description": "queue_full, writer_down or failed. Any sustained rate here means the artifact writer is behind or down; Uploads held climbing comes first.",
       "fieldConfig": {
         "defaults": {
           "unit": "ops"
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byFrameRefID",
-              "options": "C"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "none"
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 8,
         "x": 0,
         "y": 23
       },
       "id": 12,
       "targets": [
         {
-          "expr": "sum by (dlboard_rejection_reason) (rate(dlboard_artifact_write_queue_rejections_total[$__rate_interval]))",
+          "expr": "sum by (dlboard_rejection_reason) (rate(dlboard_artifact_write_queue_rejections_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{dlboard_rejection_reason}}",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(dlboard_artifact_writer_restarts_total[$__rate_interval]))",
+          "expr": "sum(rate(dlboard_artifact_writer_restarts_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "blob writer restarts",
           "refId": "B"
-        },
-        {
-          "expr": "sum(dlboard_artifact_uploads_held)",
-          "legendFormat": "uploads held",
-          "refId": "C"
         }
       ],
       "title": "Uploads turned away, by reason",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Uploads answered for but not yet written and recorded: the depth of the artifact queues. A worker turns uploads away (queue_full) once it holds DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE or DLBOARD_S3_QUEUE_SIZE (100 by default). Pushed over OTLP, each worker is a series of its own, and the busiest worker's line reaching that is the limit. Scraped from /metrics, the workers are added up, both lines are the total, and the limit is the queue size times the number of workers. Above zero with no uploads coming in, the store is refusing writes.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 23
+      },
+      "id": 28,
+      "targets": [
+        {
+          "expr": "max(dlboard_artifact_uploads_held{job=~\"$job\", deployment_environment=~\"$environment\"})",
+          "legendFormat": "the busiest worker",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(dlboard_artifact_uploads_held{job=~\"$job\", deployment_environment=~\"$environment\"})",
+          "legendFormat": "every worker",
+          "refId": "B"
+        }
+      ],
+      "title": "Uploads held, not yet written",
       "type": "timeseries"
     },
     {
@@ -425,19 +437,19 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 8,
+        "x": 16,
         "y": 23
       },
       "id": 13,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(dlboard_artifact_write_queue_wait_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(dlboard_artifact_write_queue_wait_seconds_bucket{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval])))",
           "legendFormat": "waiting for the writer",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(dlboard_artifact_ingest_queue_wait_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(dlboard_artifact_ingest_queue_wait_seconds_bucket{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval])))",
           "legendFormat": "waiting for the batch",
           "refId": "B"
         }
@@ -465,17 +477,17 @@
       "id": 14,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(dlboard_artifact_stage_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(dlboard_artifact_stage_duration_seconds_bucket{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval])))",
           "legendFormat": "staging the upload",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le, dlboard_outcome) (rate(dlboard_artifact_blob_write_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, dlboard_outcome) (rate(dlboard_artifact_blob_write_duration_seconds_bucket{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval])))",
           "legendFormat": "writing to the store, {{dlboard_outcome}}",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.95, sum by (le, dlboard_outcome) (rate(dlboard_artifact_ingest_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, dlboard_outcome) (rate(dlboard_artifact_ingest_duration_seconds_bucket{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval])))",
           "legendFormat": "recording the refs, {{dlboard_outcome}}",
           "refId": "C"
         }
@@ -503,7 +515,7 @@
       "id": 15,
       "targets": [
         {
-          "expr": "sum by (dlboard_outcome) (rate(dlboard_artifact_purges_total[$__rate_interval]))",
+          "expr": "sum by (dlboard_outcome) (rate(dlboard_artifact_purges_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{dlboard_outcome}}",
           "refId": "A"
         }
@@ -545,7 +557,7 @@
       "id": 17,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, dlboard_panel_read) (rate(dlboard_panel_read_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, dlboard_panel_read) (rate(dlboard_panel_read_duration_seconds_bucket{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval])))",
           "legendFormat": "{{dlboard_panel_read}}",
           "refId": "A"
         }
@@ -586,12 +598,12 @@
       "id": 19,
       "targets": [
         {
-          "expr": "sum(rate(dlboard_runs_created_total[$__rate_interval]))",
+          "expr": "sum(rate(dlboard_runs_created_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "started",
           "refId": "A"
         },
         {
-          "expr": "sum by (dlboard_run_status) (rate(dlboard_runs_finished_total[$__rate_interval]))",
+          "expr": "sum by (dlboard_run_status) (rate(dlboard_runs_finished_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "finished {{dlboard_run_status}}",
           "refId": "B"
         }
@@ -620,7 +632,7 @@
       "id": 20,
       "targets": [
         {
-          "expr": "sum by (dlboard_auth_outcome) (rate(dlboard_auth_sign_ins_total[$__rate_interval]))",
+          "expr": "sum by (dlboard_auth_outcome) (rate(dlboard_auth_sign_ins_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{dlboard_auth_outcome}}",
           "refId": "A"
         }
@@ -662,7 +674,7 @@
       "id": 22,
       "targets": [
         {
-          "expr": "sum by (dlboard_task, dlboard_outcome) (rate(dlboard_task_runs_total[$__rate_interval]))",
+          "expr": "sum by (dlboard_task, dlboard_outcome) (rate(dlboard_task_runs_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "{{dlboard_task}} {{dlboard_outcome}}",
           "refId": "A"
         }
@@ -690,7 +702,7 @@
       "id": 23,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, dlboard_task) (rate(dlboard_task_duration_seconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, dlboard_task) (rate(dlboard_task_duration_seconds_bucket{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval])))",
           "legendFormat": "{{dlboard_task}}",
           "refId": "A"
         }
@@ -719,7 +731,7 @@
       "id": 24,
       "targets": [
         {
-          "expr": "sum by (dlboard_task) (dlboard_task_backlog)",
+          "expr": "sum by (dlboard_task) (dlboard_task_backlog{job=~\"$job\", deployment_environment=~\"$environment\"})",
           "legendFormat": "{{dlboard_task}}",
           "refId": "A"
         }
@@ -748,7 +760,7 @@
       "id": 25,
       "targets": [
         {
-          "expr": "sum(increase(dlboard_custodian_starts_total[$__rate_interval]))",
+          "expr": "sum(increase(dlboard_custodian_starts_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "custodian starts",
           "refId": "A"
         }
@@ -790,12 +802,12 @@
       "id": 27,
       "targets": [
         {
-          "expr": "sum(rate(dlboard_retention_runs_deleted_total[$__rate_interval]))",
+          "expr": "sum(rate(dlboard_retention_runs_deleted_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "deleted",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(dlboard_retention_runs_refused_total[$__rate_interval]))",
+          "expr": "sum(rate(dlboard_retention_runs_refused_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
           "legendFormat": "refused",
           "refId": "B"
         }
@@ -810,7 +822,44 @@
     "dlboard"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(dlboard_server_workers, job)",
+        "description": "The Prometheus job of the dlboard server to show: its scrape job, or OTEL_SERVICE_NAME when it pushes over OTLP. Only jobs that report dlboard's own metrics are listed, so another service's http_server_* series are never mixed in.",
+        "label": "Service",
+        "name": "job",
+        "query": {
+          "query": "label_values(dlboard_server_workers, job)",
+          "refId": "job"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "definition": "label_values(dlboard_server_workers{job=~\"$job\"}, deployment_environment)",
+        "description": "Which deployment, for servers that share a service name: the deployment_environment label (OTEL_RESOURCE_ATTRIBUTES=deployment.environment=..., promoted to a label, or a label the scrape adds). All, for servers that don't set one.",
+        "includeAll": true,
+        "label": "Environment",
+        "name": "environment",
+        "query": {
+          "query": "label_values(dlboard_server_workers{job=~\"$job\"}, deployment_environment)",
+          "refId": "environment"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-6h",

@@ -50,7 +50,7 @@
       "id": 2,
       "targets": [
         {
-          "expr": "sum(count_over_time({service_name=\"dlboard\"} | level=\"error\" [$__auto]))",
+          "expr": "sum(count_over_time({service_name=\"$service\", deployment_environment=~\"$environment\"} | level=\"error\" [$__auto]))",
           "legendFormat": "errors",
           "refId": "A"
         }
@@ -95,7 +95,7 @@
       },
       "targets": [
         {
-          "expr": "sum(count_over_time({service_name=\"dlboard\"} |= \"dlboard could not start\" [$__range]))",
+          "expr": "sum(count_over_time({service_name=\"$service\", deployment_environment=~\"$environment\"} |= \"dlboard could not start\" [$__range]))",
           "legendFormat": "could not start",
           "refId": "A"
         }
@@ -136,7 +136,7 @@
       },
       "targets": [
         {
-          "expr": "{service_name=\"dlboard\"} | level=\"error\"",
+          "expr": "{service_name=\"$service\", deployment_environment=~\"$environment\"} | level=\"error\"",
           "refId": "A"
         }
       ],
@@ -163,7 +163,7 @@
       },
       "targets": [
         {
-          "expr": "{service_name=\"dlboard\"}",
+          "expr": "{service_name=\"$service\", deployment_environment=~\"$environment\"}",
           "refId": "A"
         }
       ],
@@ -177,7 +177,35 @@
     "dlboard"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {
+          "text": "dlboard",
+          "value": "dlboard"
+        },
+        "description": "The dlboard server's OTEL_SERVICE_NAME: dlboard unless it sets one.",
+        "label": "Service",
+        "name": "service",
+        "query": "dlboard",
+        "type": "textbox"
+      },
+      {
+        "allValue": ".*",
+        "datasource": {
+          "type": "loki",
+          "uid": "${DS_LOKI}"
+        },
+        "definition": "label_values({service_name=\"$service\"}, deployment_environment)",
+        "description": "Which deployment, for servers that share a service name (OTEL_RESOURCE_ATTRIBUTES=deployment.environment=...). All, for servers that don't set one.",
+        "includeAll": true,
+        "label": "Environment",
+        "name": "environment",
+        "query": "label_values({service_name=\"$service\"}, deployment_environment)",
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-6h",

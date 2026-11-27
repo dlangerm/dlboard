@@ -90,6 +90,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic%20<base64 of instance:token>
 ```
 
 `OTEL_SERVICE_NAME` defaults to `dlboard` (set it there, not in `OTEL_RESOURCE_ATTRIBUTES`); add your own labels with `OTEL_RESOURCE_ATTRIBUTES` (`deployment.environment=prod`).
+The [Grafana dashboards](grafana/README.md#which-server-they-show) filter by both, so two servers that share a service name still show apart once each has its own `deployment.environment`.
 Every process pushes under its own `service.instance.id`, since each counts only what it saw.
 Add them up in a query, for example `sum without (service_instance_id) (rate(dlboard_ingest_metric_values_total[5m]))`.
 

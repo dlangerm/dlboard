@@ -11,6 +11,20 @@ Three dashboards, one per signal dlboard exports:
 The metrics dashboard needs a Prometheus that has dlboard's metrics: either one scraping `/metrics` (`DLBOARD_TELEMETRY_METRICS=prometheus`), or one receiving them over OTLP (`DLBOARD_TELEMETRY_METRICS=otlp`).
 The logs dashboard needs `DLBOARD_TELEMETRY_LOGS=true`, and the traces dashboard needs `DLBOARD_TELEMETRY_TRACES=true`.
 
+## Which server they show
+
+Each dashboard shows one dlboard server, chosen at the top:
+
+- **Service**: on the metrics dashboard, the Prometheus `job`, listed from the jobs that report dlboard's own metrics: the scrape job's name, or `OTEL_SERVICE_NAME` (`dlboard` by default) when metrics are pushed over OTLP.
+  On the logs and traces dashboards, `OTEL_SERVICE_NAME` itself, typed in (`dlboard` by default).
+  Every query is filtered by it, so another service's `http_server_*` series or log lines never mix in.
+- **Environment** (metrics and logs): the `deployment_environment` label, for servers that share a service name, a production one and a test one say.
+  Give each its own with `OTEL_RESOURCE_ATTRIBUTES=deployment.environment=prod`, then make it a label: Prometheus 3 takes it from OTLP with `otlp.promote_resource_attributes: [deployment.environment]`, a scrape adds it as a target label, and Loki makes it a label by default.
+  **All** shows servers that set none.
+  The traces dashboard has no environment filter, since TraceQL drops a span that lacks the attribute; give those servers different service names instead.
+
+A test (`dlboard/serve/telemetry/tests/dashboard_test.py`) fails a metrics query that doesn't filter by both.
+
 ## Import them
 
 In Grafana: **Dashboards → New → Import**, upload the file, and pick the data source for its input (**Prometheus**, **Loki** or **Tempo**).
@@ -47,7 +61,8 @@ The dashboards are files in this repo, so changes go through review like any oth
 
 When a metric, log label or span name is renamed or added, update the panels that use it.
 The metrics queries are written against the Prometheus names of the metrics in [telemetry.md](../telemetry.md): dots become underscores, counters end in `_total`, and the unit is appended (`_seconds`, `_bytes`).
-The log queries use the `service_name` label and the `level` and `trace_id` fields; the trace queries use span names from the same document.
+Every metrics query matches `job=~"$job", deployment_environment=~"$environment"` on each series it reads.
+The log queries use the `service_name` and `deployment_environment` labels and the `level` and `trace_id` fields; the trace queries use `resource.service.name` and span names from the same document.
 
 For the metrics dashboard a test keeps this honest (`dlboard/serve/telemetry/tests/dashboard_test.py`).
 A new metric fails it until it has a row in [telemetry.md](../telemetry.md) and a panel in `dlboard.json`, or an entry in the test's `NOT_CHARTED` with the reason it is left off.
