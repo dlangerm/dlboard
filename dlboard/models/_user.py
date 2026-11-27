@@ -28,6 +28,10 @@ SYSTEM_ISSUER: Final = "dlboard:system"
 """The issuer of dlboard's own background work (see `Principal.system`): no auth provider issues it."""
 
 
+class UsernameTakenError(ValueError):
+    """A new identity's username is already another identity's: someone must sign in under another, or an admin rename one."""
+
+
 class Principal(BaseModel, frozen=True, extra="forbid"):
     """Who an `AuthProvider` says the in-flight caller is -- not yet a stored `User`."""
 

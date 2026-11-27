@@ -982,8 +982,8 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         )
         created = self._fetch(models.User, by_identity)
         if not created:
-            msg = f"The username {principal.username!r} is already taken by a different identity"
-            raise ValueError(msg)
+            msg = f"The username {principal.username!r} is already another account's"
+            raise models.UsernameTakenError(msg)
         (user,) = created
         if principal.issuer != models.UNVERIFIED_ISSUER:
             return user

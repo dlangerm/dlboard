@@ -364,6 +364,11 @@ class SkewTolerantSessions(SecureCookieSessionInterface):
         return self.session_class(data)
 
 
+def _username_taken(taken: models.UsernameTakenError) -> tuple[BaseResponse, int]:
+    """A new identity under a name its identity provider gave someone else first: theirs to sort out, not a server error."""
+    return jsonify(error=f"{taken}: ask an admin"), HTTPStatus.FORBIDDEN
+
+
 def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> None:
     """
     Put every route on `app` (except `add_public_route` ones) behind authentication.
@@ -375,6 +380,7 @@ def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> 
     settings = AuthSettings()
     AUTH_SETTINGS.set(app, settings)
     app.server.config["MAX_CONTENT_LENGTH"] = RequestLimits().max_upload_bytes
+    app.server.register_error_handler(models.UsernameTakenError, _username_taken)
     if provider.verifies_identity:
         if settings.secret_key is None:
             msg = f"The {provider.display_name} auth provider needs DLBOARD_SECRET_KEY set to sign sessions"

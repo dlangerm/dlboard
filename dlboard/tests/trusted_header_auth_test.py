@@ -132,3 +132,35 @@ def test_a_deployment_that_names_no_issuer_or_no_proxy_does_not_start(
     monkeypatch.delenv(missing)
     with pytest.raises(ValidationError, match=missing):
         build_app([sqlite, filesystem, *TRUSTED_HEADER_AUTH, *BUILTIN_BACKEND])
+
+
+def test_an_account_is_known_by_the_user_header_and_named_by_the_username_header(client: FlaskClient) -> None:
+    """The stable id an identity provider gives (an OIDC `sub`) is rarely a name anyone wants to read, or type in a grant."""
+    keycloak = {"X-Forwarded-User": "8f14e45f-ceea", "X-Forwarded-Preferred-Username": "bob"}
+
+    first = client.get(f"/{WHOAMI_PATH}", environ_base=_PROXY, headers=keycloak)
+    renamed = client.get(
+        f"/{WHOAMI_PATH}",
+        environ_base=_PROXY,
+        headers={**keycloak, "X-Forwarded-Preferred-Username": "robert"},
+    )
+
+    assert first.get_json()["username"] == renamed.get_json()["username"] == "bob"
+    store = get_system_data_store(client.application.extensions[DASH_APP_EXTENSION])
+    bob = store.find_user("bob")
+    assert bob is not None
+    assert (bob.issuer, bob.subject) == ("sso.example.com", "8f14e45f-ceea")
+
+
+def test_a_new_identity_under_a_name_already_taken_is_refused_saying_so(client: FlaskClient) -> None:
+    """Not a server error: the identity provider gave two people one name, which an admin sorts out."""
+    client.get(f"/{WHOAMI_PATH}", environ_base=_PROXY, headers=_ALICE)
+
+    response = client.get(
+        f"/{WHOAMI_PATH}",
+        environ_base=_PROXY,
+        headers={"X-Forwarded-User": "another-alice", "X-Forwarded-Preferred-Username": "alice"},
+    )
+
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert "'alice' is already another account's" in response.get_json()["error"]

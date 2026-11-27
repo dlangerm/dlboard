@@ -39,7 +39,7 @@ def test_a_user_is_its_issuer_and_subject_and_signing_in_again_refreshes_its_pro
 def test_a_taken_username_is_never_shared_between_identities(store: SQLLiteStore) -> None:
     store.get_or_create_user(_principal("sub-1", username="alice"))
 
-    with pytest.raises(ValueError, match="already taken"):
+    with pytest.raises(models.UsernameTakenError):
         store.get_or_create_user(_principal("sub-2", username="alice", issuer="other-idp"))
 
 

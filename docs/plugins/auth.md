@@ -145,6 +145,20 @@ Authelia sends `Remote-User`, `Remote-Email` and `Remote-Groups`; Pomerium sends
   `DLBOARD_TRUSTED_HEADER_PROXIES` is checked against the connection's own address, never against `X-Forwarded-For`, which a client can write.
   A request from anywhere else that carries one of the headers gets a 403, so a network that lets someone reach dlboard around the proxy shows up at once.
   The proxy must also overwrite these headers on every request it forwards, never pass along ones the client sent (oauth2-proxy and Pomerium do).
+- **An account is made the first time the proxy names someone.**
+  There is nothing to create beforehand, and Admin → Users lists people once they have visited.
+  A new account can see only what is shared with everyone (`DLBOARD_NEW_PROJECT_ACCESS`, a project's sharing) or with one of its groups, and can make projects of its own.
+  Admins come from `DLBOARD_ADMIN_GROUPS` or `DLBOARD_ADMIN_USERS`; nobody is made admin for signing in first.
+- **It is known by its user header, and named by its username header.**
+  The user header must carry the identity provider's stable id (an OIDC `sub`): an account is found by it on every request, so a value that changes (an email, a renamed user) makes a new, empty account.
+  The username header (`X-Forwarded-Preferred-Username`, which oauth2-proxy sends) is the readable name the account is made with, and what sharing and `DLBOARD_ADMIN_USERS` name it by; without it, the account is named by its user header.
+  The name is set once: renaming someone in the identity provider doesn't rename them here, and a new identity under a name another account already has is refused, saying so.
+  If people can choose their own username in the identity provider, grant admin by group (`DLBOARD_ADMIN_GROUPS`), not by name: anyone could otherwise take a name in `DLBOARD_ADMIN_USERS` that hasn't signed in yet.
+- **A project can be shared with someone once they have visited.**
+  Before that, the Sharing tab doesn't know the name; share with one of their groups instead, which works for people who haven't visited yet ([#821](https://github.com/dlangerm/dlboard/issues/821)).
+- **When someone leaves, disable them in Admin → Users.**
+  Removing them from the identity provider stops the proxy signing them in, but their API tokens keep working, since a token never goes through the proxy, and their groups stay as the proxy last sent them ([#822](https://github.com/dlangerm/dlboard/issues/822)).
+  A disabled user can't use the app or any token.
 - **A training script signs in with an API token, not the proxy.**
   A token works from anywhere, so a script can talk to dlboard directly or through the proxy, if the proxy lets bearer tokens through.
 - **Signing out is the proxy's to do:** the headers sign a browser in again on its next request.

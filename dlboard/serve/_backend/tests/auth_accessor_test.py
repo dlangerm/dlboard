@@ -91,7 +91,7 @@ def test_sign_in_refreshes_groups_and_keeps_one_user_per_identity(store: SQLLite
 def test_a_username_taken_by_another_identity_is_refused(store: SQLLiteStore) -> None:
     store.get_or_create_user(models.Principal.unverified("sam"))
 
-    with pytest.raises(ValueError, match="already taken"):
+    with pytest.raises(models.UsernameTakenError):
         store.get_or_create_user(_principal("sam"))
 
 

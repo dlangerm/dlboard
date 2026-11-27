@@ -163,7 +163,8 @@ See [auth.md](plugins/auth.md).
 | `DLBOARD_ADMIN_GROUPS` | none | Comma-separated identity-provider groups whose members are admins. |
 | `DLBOARD_TRUSTED_HEADER_ISSUER` | required by `TRUSTED_HEADER_AUTH` | A stable name for the identity source behind the proxy (`sso.example.com`). A user is known by it and the user header together. |
 | `DLBOARD_TRUSTED_HEADER_PROXIES` | required by `TRUSTED_HEADER_AUTH` | Comma-separated addresses or networks (`10.0.0.5`, `172.18.0.0/16`) of the proxy: the only peers whose identity headers are believed, by the connection's own address. |
-| `DLBOARD_TRUSTED_HEADER_USER` | `X-Forwarded-User` | The header with the caller's stable id, which is also their username. |
+| `DLBOARD_TRUSTED_HEADER_USER` | `X-Forwarded-User` | The header with the caller's stable id (an OIDC `sub`), which their account is known by for good. Have the proxy send one that never changes: a different value later is a different, new account. |
+| `DLBOARD_TRUSTED_HEADER_USERNAME` | `X-Forwarded-Preferred-Username` | The header with the name a new account is made with, shown in the app and matched by `DLBOARD_ADMIN_USERS`. A request without it is named by the user header. Set once, when the account is made. |
 | `DLBOARD_TRUSTED_HEADER_EMAIL` | `X-Forwarded-Email` | The header with their email. |
 | `DLBOARD_TRUSTED_HEADER_GROUPS` | `X-Forwarded-Groups` | The header with their comma-separated groups, matched against group grants and `DLBOARD_ADMIN_GROUPS`. |
 | `DLBOARD_NEW_PROJECT_ACCESS` | none (private) | The role (`viewer`, `editor`, `owner`) everyone gets on a newly created project. |

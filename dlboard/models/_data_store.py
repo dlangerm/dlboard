@@ -70,7 +70,7 @@ class DataStore(typing.Protocol[_P]):
         Refreshes a known user's `email`/`groups` from `principal`. Brand new users are granted no
         scopes -- except the very first `UNVERIFIED_ISSUER` user a store ever creates, which gets
         `Scope.ALL` so a local single-user install has a working admin with zero configuration.
-        Raises `ValueError` if `principal.username` is already taken by a different identity.
+        Raises `UsernameTakenError` if `principal.username` is already taken by a different identity.
         """
         ...
 

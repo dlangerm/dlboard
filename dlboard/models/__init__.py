@@ -119,7 +119,14 @@ from dlboard.models._tag import (
     format_tag_value,
 )
 from dlboard.models._theme import ColorScheme, SchemeColors, ThemeSpec
-from dlboard.models._user import SYSTEM_ISSUER, UNVERIFIED_ISSUER, NewUser, Principal, User
+from dlboard.models._user import (
+    SYSTEM_ISSUER,
+    UNVERIFIED_ISSUER,
+    NewUser,
+    Principal,
+    User,
+    UsernameTakenError,
+)
 from dlboard.models._view import (
     ADVANCED_SECTION,
     DATA_SECTION,
@@ -306,6 +313,7 @@ __all__ = [
     "UnknownChartTypeError",
     "UnservableArtifactRefError",
     "User",
+    "UsernameTakenError",
     "ValidJsonTypes",
     "ViewSummary",
     "ViewerState",

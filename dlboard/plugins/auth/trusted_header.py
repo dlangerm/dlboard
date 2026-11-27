@@ -9,6 +9,9 @@ so a network that lets someone reach dlboard around the proxy shows up at once i
 
 An API token still works on its own, from anywhere, so a training script needs no proxy session. Signing out is the
 proxy's to do: dlboard has no session of its own to end, since the headers sign the browser in again on its next request.
+
+A person's account is made the first time the proxy names them, keyed by the user header (their stable id) and named by
+the username header (a readable name), with no access but what is shared with everyone or their groups.
 """
 
 from __future__ import annotations
@@ -47,7 +50,19 @@ class TrustedHeaderSettings(BaseSettings):
     """Comma-separated addresses or networks of the proxy: the only peers whose headers are believed."""
 
     user: str = "X-Forwarded-User"
-    """The header with the caller's stable id, which is also their username."""
+    """
+    The header with the caller's stable id (an OIDC `sub`): what their account is known by, for good.
+
+    Changing which claim the proxy sends here later makes everyone a new, empty account, so pick one that never changes.
+    """
+
+    username: str = "X-Forwarded-Preferred-Username"
+    """
+    The header with the name a new account is made with, shown in the app and matched by `DLBOARD_ADMIN_USERS`.
+
+    A request without it is named by its user header. Set when the account is made: renaming someone in the identity
+    provider doesn't rename them here.
+    """
 
     email: str = "X-Forwarded-Email"
     """The header with their email, if the proxy sends one."""
@@ -60,6 +75,7 @@ class _Claimed(NamedTuple):
     """What the identity headers of a request say, each empty if its header isn't there."""
 
     user: str
+    username: str
     email: str
     groups: frozenset[str]
 
@@ -69,7 +85,10 @@ class _Claimed(NamedTuple):
             return request.headers.get(name, "").strip()
 
         return cls(
-            header(settings.user), header(settings.email), frozenset(comma_items(header(settings.groups)))
+            header(settings.user),
+            header(settings.username),
+            header(settings.email),
+            frozenset(comma_items(header(settings.groups))),
         )
 
 
@@ -110,7 +129,7 @@ class TrustedHeaderAuthProvider:
         return Principal(
             issuer=settings.issuer,
             subject=claimed.user,
-            username=claimed.user,
+            username=claimed.username or claimed.user,
             email=claimed.email or None,
             groups=claimed.groups,
         )
