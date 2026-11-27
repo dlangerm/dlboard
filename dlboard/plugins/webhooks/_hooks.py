@@ -23,7 +23,7 @@ import time
 import uuid
 from http import HTTPStatus
 from ipaddress import IPv4Address, IPv6Address, ip_address
-from typing import TYPE_CHECKING, Annotated, Any, Final, Self, override
+from typing import TYPE_CHECKING, Annotated, Any, Final, NamedTuple, Self, override
 from urllib.parse import urljoin, urlsplit
 
 import pendulum
@@ -87,30 +87,24 @@ class WebhookEvent(StrEnum):
                 return None
 
     @property
-    def label(self) -> str:
-        """What the Webhooks tab calls it."""
+    def words(self) -> EventWords:
+        """How the event is put in words: on the Webhooks tab, and in a post's `text`."""
         match self:
             case WebhookEvent.FINISHED:
-                return "Finished"
+                return EventWords("Finished", "finished")
             case WebhookEvent.FAILED:
-                return "Failed"
+                return EventWords("Failed", "failed")
             case WebhookEvent.CRASHED:
-                return "Crashed"
+                return EventWords("Crashed", "crashed (its process stopped being heard from)")
             case WebhookEvent.ENDED:
-                return "Ended without saying how"
+                return EventWords("Ended without saying how", "ended without saying how")
 
-    @property
-    def verb(self) -> str:
-        """What a run did, in the sentence a post's `text` is."""
-        match self:
-            case WebhookEvent.FINISHED:
-                return "finished"
-            case WebhookEvent.FAILED:
-                return "failed"
-            case WebhookEvent.CRASHED:
-                return "crashed (its process stopped being heard from)"
-            case WebhookEvent.ENDED:
-                return "ended without saying how"
+
+class EventWords(NamedTuple):
+    label: str
+    """What the Webhooks tab calls the event."""
+    verb: str
+    """What a run did, in the sentence a post's `text` is."""
 
 
 class WebhookSettings(BaseSettings):
@@ -228,7 +222,7 @@ class WebhookPayload(BaseModel, frozen=True, extra="forbid"):
         where = f"{project.name} / {experiment.name or f'Experiment {experiment.id}'}"
         return cls(
             event=event,
-            text=f"{run.name or f'Run {run.id}'} {event.verb}{after}, in {where}: {link}",
+            text=f"{run.name or f'Run {run.id}'} {event.words.verb}{after}, in {where}: {link}",
             project=Named(id=project.id, name=project.name),
             experiment=Named(id=experiment.id, name=experiment.name),
             run=RunSummary(
