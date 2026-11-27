@@ -129,7 +129,7 @@ def _row(hook: Webhook) -> Component:
     return dmc.TableTr(
         [
             dmc.TableTd(dmc.Code(str(hook.url)), style={"wordBreak": "break-all"}),
-            dmc.TableTd(", ".join(e.label for e in WebhookEvent if e in hook.events)),
+            dmc.TableTd(", ".join(e.words.label for e in WebhookEvent if e in hook.events)),
             dmc.TableTd(status),
             dmc.TableTd(
                 dmc.Group(
@@ -171,7 +171,7 @@ def _section(project: Project) -> Component:
                     dmc.TextInput(id=URL_ID, placeholder="https://hooks.slack.com/services/...", w=380),
                     dmc.MultiSelect(
                         id=EVENTS_ID,
-                        data=[{"value": e, "label": e.label} for e in WebhookEvent],
+                        data=[{"value": e, "label": e.words.label} for e in WebhookEvent],
                         value=list(_DEFAULT_EVENTS),
                         w=320,
                     ),
