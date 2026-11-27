@@ -14,18 +14,19 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
-from typing import TYPE_CHECKING, Annotated, Any, Final, override
+from typing import TYPE_CHECKING, Any, Final, override
 from urllib.parse import urlsplit, urlunsplit
 
 import pendulum
 from flask import g, has_request_context, jsonify, redirect, request, session
 from flask.sessions import SecureCookieSessionInterface
 from itsdangerous import BadSignature
-from pydantic import NonNegativeInt, PositiveInt, SecretStr, field_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic import NonNegativeInt, PositiveInt, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard import models
+from dlboard._comma_separated import CommaSeparated
 from dlboard.serve._backend import _api_tokens
 from dlboard.serve._backend._app_slot import AppSlot
 from dlboard.serve._url import relative_path
@@ -108,19 +109,14 @@ class AuthSettings(BaseSettings):
     secure_cookies: bool = True
     """Only send the session cookie over HTTPS. Turn off only for plain-HTTP local testing."""
 
-    admin_users: Annotated[list[str], NoDecode] = []
+    admin_users: CommaSeparated[list[str]] = []
     """Comma-separated usernames granted `Scope.ALL` whenever they sign in -- how the first admin is made."""
 
-    admin_groups: Annotated[list[str], NoDecode] = []
+    admin_groups: CommaSeparated[list[str]] = []
     """Comma-separated IdP groups whose members are granted `Scope.ALL` whenever they sign in."""
 
     new_project_access: models.ProjectRole | None = None
     """The `Project.everyone_role` a newly created project starts with. Unset keeps new projects private."""
-
-    @field_validator("admin_users", "admin_groups", mode="before")
-    @classmethod
-    def _split_commas(cls, value: Any) -> Any:  # noqa: ANN401 -- a `mode="before"` validator sees the raw input
-        return [v.strip() for v in value.split(",") if v.strip()] if isinstance(value, str) else value
 
 
 class RequestLimits(BaseSettings):

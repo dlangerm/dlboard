@@ -2761,6 +2761,8 @@
   "dlboard/tests/client_import_isolation_test.py::test_turning_tracing_on_without_the_otel_extra_names_the_client_extra": 0.2399928289996751,
   "dlboard/tests/client_logging_test.py::test_a_host_applications_own_structlog_setup_is_left_alone": 0.0012786180013790727,
   "dlboard/tests/client_logging_test.py::test_a_logged_client_failure_is_short_and_keeps_secrets_out": 0.013487019001331646,
+  "dlboard/tests/comma_separated_test.py::test_an_env_var_reads_as_its_items_whatever_the_spacing_and_empty_items": 0.1941303119965596,
+  "dlboard/tests/comma_separated_test.py::test_items_given_in_code_are_left_as_they_are": 0.0012650870048673823,
   "dlboard/tests/compare_browser_test.py::test_adding_pinned_runs_to_a_comparison_on_screen_changes_it_and_forks_nothing[chromium]": 2.0341126280000026,
   "dlboard/tests/compare_browser_test.py::test_comparing_the_same_pinned_runs_again_opens_the_comparison_already_made[chromium]": 2.6183829990040977,
   "dlboard/tests/compare_browser_test.py::test_pinning_runs_of_two_experiments_and_comparing_the_pins_is_one_menu_away[chromium]": 6.495919765999133,

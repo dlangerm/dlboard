@@ -22,6 +22,7 @@ from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import BeforeValidator, Field
 
+from dlboard._comma_separated import split_commas
 from dlboard.models import PinColor
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
@@ -70,7 +71,7 @@ from dlboard.serve._pages._run_list._delete import (
 from dlboard.serve._pages._run_list._ids import navigate_id
 from dlboard.serve._pages._run_list._rows import register_row_updates, row_update_shells, row_updates_id
 from dlboard.serve._pages._run_list._table import run_grid
-from dlboard.serve._url import UrlState, split_commas
+from dlboard.serve._url import UrlState
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

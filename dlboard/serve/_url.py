@@ -41,15 +41,6 @@ class UrlState(BaseModel):
                 return handler({})
 
 
-def split_commas[T](value: str | T) -> list[str] | T:
-    """
-    A comma-separated query value (`?compare=3,7`) as its items, for a `BeforeValidator` to hand on.
-
-    A value that isn't a string -- a model built in code, with the items already apart -- is left for validation to judge.
-    """
-    return [item for item in value.split(",") if item] if isinstance(value, str) else value
-
-
 def relative_path(path: str) -> str:
     """
     `path`, prefixed with `DLBOARD_URL_PREFIX` if a deployment set one (see `dlboard.serve.app.app`).

@@ -21,20 +21,19 @@ from __future__ import annotations
 
 import importlib.metadata
 import re
-from typing import TYPE_CHECKING, Annotated, Final, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 from opentelemetry.instrumentation.dependencies import get_dependency_conflicts
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from pydantic import field_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
+from dlboard._comma_separated import CommaSeparated
 from dlboard.serve._settings_env import set_setting_env
 
 if TYPE_CHECKING:
     from collections.abc import Collection
     from importlib.metadata import EntryPoint
-    from typing import Any
 
     from flask import Flask
     from opentelemetry.sdk.trace import TracerProvider
@@ -89,17 +88,12 @@ class InstrumentationSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="OTEL_PYTHON_")
 
-    disabled_instrumentations: Annotated[frozenset[str], NoDecode] = frozenset()
+    disabled_instrumentations: CommaSeparated[frozenset[str]] = frozenset()
     """Comma-separated instrumentor names (`sqlalchemy`, `psycopg`, `botocore`, ...) not to run."""
     excluded_urls: str = ""
     """Comma-separated regular expressions of request URLs not to trace, besides dlboard's own."""
     flask_excluded_urls: str = ""
     """For Flask alone; when set it replaces `excluded_urls`, as OpenTelemetry's own instrumentation reads the two."""
-
-    @field_validator("disabled_instrumentations", mode="before")
-    @classmethod
-    def _split_commas(cls, value: Any) -> Any:  # noqa: ANN401 -- a `mode="before"` validator sees the raw input
-        return [v.strip() for v in value.split(",") if v.strip()] if isinstance(value, str) else value
 
 
 class HeaderCaptureSettings(BaseSettings):

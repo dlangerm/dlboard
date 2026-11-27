@@ -31,12 +31,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Final, Protocol, Self, override
+from typing import TYPE_CHECKING, Any, Final, Protocol, Self, override
 
-from pydantic import PositiveFloat, field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic import PositiveFloat, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
+from dlboard._comma_separated import CommaSeparated
 from dlboard._telemetry import Attributes, PerProcess, attribute
 from dlboard._telemetry.traces import (
     TRACES,
@@ -74,7 +75,7 @@ class TelemetrySettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="DLBOARD_TELEMETRY_")
 
-    metrics: Annotated[frozenset[MetricsExporter], NoDecode] = frozenset()
+    metrics: CommaSeparated[frozenset[MetricsExporter]] = frozenset()
     """Comma-separated exporters (`otlp`, `prometheus`) to send metrics to. Unset exports none."""
     logs: bool = False
     """Also send every log event over OTLP."""
@@ -86,11 +87,6 @@ class TelemetrySettings(BaseSettings):
     """
     prometheus_snapshot_s: PositiveFloat = 15
     """How often each process writes its snapshot -- how stale another worker's numbers on `/metrics` can be."""
-
-    @field_validator("metrics", mode="before")
-    @classmethod
-    def _split_commas(cls, value: Any) -> Any:  # noqa: ANN401 -- a `mode="before"` validator sees the raw input
-        return [v.strip() for v in value.split(",") if v.strip()] if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def _require_extra(self) -> Self:

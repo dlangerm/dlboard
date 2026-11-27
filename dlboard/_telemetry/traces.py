@@ -25,12 +25,13 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, Final, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Annotated, Final, TypeAlias, TypeVar
 
-from pydantic import field_validator, model_validator
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic import BeforeValidator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
+from dlboard._comma_separated import CommaSeparated
 from dlboard._compat import StrEnum
 from dlboard._telemetry import Attributes, PerProcess, attribute
 
@@ -184,13 +185,10 @@ class TracesExporterSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="OTEL_")
 
-    traces_exporter: Annotated[frozenset[TracesExporter], NoDecode] = frozenset({TracesExporter.OTLP})
-    """Comma-separated. `none` exports nothing, though the traces still cross processes."""
-
-    @field_validator("traces_exporter", mode="before")
-    @classmethod
-    def _split_commas(cls, value: Any) -> Any:  # noqa: ANN401 -- a `mode="before"` validator sees the raw input
-        return [v.strip().lower() for v in value.split(",") if v.strip()] if isinstance(value, str) else value
+    traces_exporter: CommaSeparated[frozenset[Annotated[TracesExporter, BeforeValidator(str.lower)]]] = (
+        frozenset({TracesExporter.OTLP})
+    )
+    """Comma-separated, in any case. `none` exports nothing, though the traces still cross processes."""
 
 
 def traces_protocol(exporters: frozenset[TracesExporter]) -> OtlpProtocol | None:

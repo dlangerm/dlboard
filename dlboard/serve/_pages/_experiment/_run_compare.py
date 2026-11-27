@@ -31,6 +31,7 @@ from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
+from dlboard._comma_separated import split_commas
 from dlboard.models import MetricReduction, Run
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon, series_swatch_class
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
@@ -43,7 +44,7 @@ from dlboard.serve._pages._experiment._paging import page_slice
 from dlboard.serve._pages._experiment._panel_data import experiment_names
 from dlboard.serve._pages._experiment._run_picker import run_options
 from dlboard.serve._pages._experiment._shown_runs import page_scope
-from dlboard.serve._url import UrlState, split_commas
+from dlboard.serve._url import UrlState
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping

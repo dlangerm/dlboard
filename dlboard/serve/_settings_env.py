@@ -1,12 +1,9 @@
-"""Settings helpers: coupling a resolved value to the env var a `BaseSettings` field reads, and comma-separated values."""
+"""Settings helpers: coupling a resolved value to the env var a `BaseSettings` field reads."""
 
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Annotated
-
-from pydantic import BeforeValidator
-from pydantic_settings import NoDecode
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,21 +26,3 @@ def set_setting_env(settings_cls: type[BaseSettings], field_name: str, value: st
         raise AttributeError(msg)
     prefix = settings_cls.model_config.get("env_prefix", "")
     os.environ[f"{prefix}{field_name}".upper()] = str(value)  # dlboard-ignore[forbid-string-ignore]
-
-
-def comma_items(text: str) -> list[str]:
-    """`a, b,,c` as `["a", "b", "c"]`: each item stripped, the empty ones dropped."""
-    return [item.strip() for item in text.split(",") if item.strip()]
-
-
-def _split[T](value: str | T) -> list[str] | T:
-    return comma_items(value) if isinstance(value, str) else value
-
-
-type CommaSeparated[T] = Annotated[T, NoDecode, BeforeValidator(_split)]
-"""
-A settings field read from one comma-separated env var (`10.0.0.5, 172.18.0.0/16`), each item validated as `T`'s.
-
-`NoDecode`, so pydantic-settings hands the raw string over instead of reading it as JSON; a value built in code, with the
-items already apart, is left for validation to judge.
-"""
