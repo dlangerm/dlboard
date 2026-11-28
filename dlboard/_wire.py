@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Final, Generic, TypeVar
 
 import pendulum
-from pydantic import AwareDatetime, BaseModel, Field, TypeAdapter, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, RootModel, TypeAdapter, field_validator
 
 from dlboard import models
 from dlboard._compat import StrEnum
@@ -164,6 +164,10 @@ class MetricPoint(BaseModel, frozen=True, extra="ignore"):
     step: int
     value: float | None
     timestamp_utc: AwareDatetime
+
+
+class RunHyperparams(RootModel[models.FlatHparamDict]):
+    """A run's hyperparameters as it logged them (`Read.HYPERPARAMS`): one flat object, empty if it logged none."""
 
 
 class LatestValue(BaseModel, frozen=True, extra="ignore"):

@@ -3,11 +3,11 @@
 from dataclasses import dataclass
 from http import HTTPStatus
 from time import perf_counter
-from typing import Any, Callable, Final, Iterable
+from typing import Callable, Final, Iterable
 
 import dash
-from flask import request
-from pydantic import ValidationError
+from flask import Response, request
+from pydantic import TypeAdapter, ValidationError
 from structlog.stdlib import get_logger
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import NotFound
@@ -33,6 +33,7 @@ from dlboard._wire import (
     run_path,
 )
 from dlboard.models import DataStore
+from dlboard.plugins.backend._answers import answer, body
 from dlboard.plugins.backend._reads import READ_ROUTES
 from dlboard.serve import (
     allow_run_tokens,
@@ -69,6 +70,11 @@ def _values_in(logged: models.LoggedMetrics) -> int:
     return len(logged.metrics)
 
 
+_BATCH: Final = TypeAdapter(list[object])
+"""A batch of metrics, as a list: each item is validated as it is stored, so a big batch is never held twice."""
+_LINKS: Final = TypeAdapter(list[models.NewArtifactLink])
+
+
 # -- Route handlers -------------------------------------------------------------------------------
 #
 # Split out from the `@dash.hooks.route`-decorated view functions below so the actual request
@@ -78,82 +84,75 @@ def _values_in(logged: models.LoggedMetrics) -> int:
 # stays entirely the auth provider's concern.
 
 
-def handle_create_project(store: DataStore[...], body: dict[str, Any], actor: models.User) -> dict[str, Any]:
+def handle_create_project(
+    store: DataStore[...], new: models.NewProject, actor: models.User
+) -> models.Project:
     """Create a project, attributed to `actor`."""
-    project = models.NewProject.model_validate(body).model_copy(update={"created_by": actor.id})
-    return store.create_project(project).model_dump(mode="json")
+    return store.create_project(new.model_copy(update={"created_by": actor.id}))
 
 
 def handle_create_experiment(
-    store: DataStore[...], body: dict[str, Any], actor: models.User
-) -> dict[str, Any]:
+    store: DataStore[...], new: models.NewExperiment, actor: models.User
+) -> models.Experiment:
     """Create an experiment, attributed to `actor`."""
-    experiment = models.NewExperiment.model_validate(body).model_copy(update={"created_by": actor.id})
-    return store.create_experiment(experiment).model_dump(mode="json")
+    return store.create_experiment(new.model_copy(update={"created_by": actor.id}))
 
 
 def handle_get_or_create_project(
-    store: DataStore[...], body: dict[str, Any], actor: models.User
-) -> dict[str, Any]:
+    store: DataStore[...], asked: GetOrCreateProject, actor: models.User
+) -> models.Project:
     """Get or create a project by name, attributed to `actor` if it's newly created."""
-    req = GetOrCreateProject.model_validate(body)
-    return store.get_or_create_project(req.name, req.description, created_by=actor.id).model_dump(mode="json")
+    return store.get_or_create_project(asked.name, asked.description, created_by=actor.id)
 
 
 def handle_get_or_create_experiment(
-    store: DataStore[...], body: dict[str, Any], actor: models.User
-) -> dict[str, Any]:
+    store: DataStore[...], asked: GetOrCreateExperiment, actor: models.User
+) -> models.Experiment:
     """Get or create an experiment by name within a project, attributed to `actor` if newly created."""
-    req = GetOrCreateExperiment.model_validate(body)
     return store.get_or_create_experiment(
-        req.project_id, req.name, created_by=actor.id, source=req.source
-    ).model_dump(mode="json")
+        asked.project_id, asked.name, created_by=actor.id, source=asked.source
+    )
 
 
-def handle_create_run(store: DataStore[...], body: dict[str, Any], actor: models.User) -> dict[str, Any]:
+def handle_create_run(store: DataStore[...], new: models.NewRun, actor: models.User) -> models.Run:
     """Create a run, attributed to `actor`."""
-    run = models.NewRun.model_validate(body).model_copy(update={"created_by": actor.id})
-    created = store.create_run(run)
+    created = store.create_run(new.model_copy(update={"created_by": actor.id}))
     _RUNS_CREATED.add(1)
-    return created.model_dump(mode="json")
+    return created
 
 
-def handle_finish_run(store: DataStore[...], run_id: int, body: dict[str, Any]) -> dict[str, Any]:
-    """Record that run `run_id`'s client is done, as and when it reports (`FinishRun`). 404 as `handle_get_run`."""
-    req = FinishRun.model_validate(body)
+def handle_finish_run(store: DataStore[...], run_id: int, finish: FinishRun) -> models.Run:
+    """Record that run `run_id`'s client is done, as and when it reports. 404 as `handle_get_run`."""
     if store.get_run(run_id) is None:
         raise NotFound
-    finished = store.finish_run(run_id, req.status, req.ended_at)
-    _RUNS_FINISHED.add(1, _FinishedAttributes(status=req.status))
-    return finished.model_dump(mode="json")
+    finished = store.finish_run(run_id, finish.status, finish.ended_at)
+    _RUNS_FINISHED.add(1, _FinishedAttributes(status=finish.status))
+    return finished
 
 
-def handle_mark_run(
-    store: DataStore[...], run_id: int, body: dict[str, Any], actor: models.User
-) -> dict[str, Any]:
+def handle_mark_run(store: DataStore[...], run_id: int, mark: MarkRun, actor: models.User) -> models.Run:
     """
-    Keep, pin and/or tag run `run_id` as `actor` (`MarkRun`), and say how the run stands. 404 as `handle_get_run`.
+    Keep, pin and/or tag run `run_id` as `actor`, and say how the run stands. 404 as `handle_get_run`.
 
     The keep comes first: it needs more than a pin does, so a writer who may pin but not keep marks nothing.
     """
-    req = MarkRun.model_validate(body)
     if store.get_run(run_id) is None:
         raise NotFound
-    if req.keep:
+    if mark.keep:
         store.keep_runs(frozenset({run_id}), actor)
-    if req.pin is not None:
-        store.pin_runs(actor.id, frozenset({run_id}), req.pin)
-    if req.tags:
-        store.tag_runs(frozenset({run_id}), frozenset(req.tags), actor)
+    if mark.pin is not None:
+        store.pin_runs(actor.id, frozenset({run_id}), mark.pin)
+    if mark.tags:
+        store.tag_runs(frozenset({run_id}), frozenset(mark.tags), actor)
     return handle_get_run(store, run_id)
 
 
-def handle_get_run(store: DataStore[...], run_id: int) -> dict[str, Any]:
+def handle_get_run(store: DataStore[...], run_id: int) -> models.Run:
     """An existing run, for a client attaching to it. 404 when it's missing, deleted or not visible to the caller."""
     run = store.get_run(run_id)
     if run is None:
         raise NotFound
-    return run.model_dump(mode="json")
+    return run
 
 
 def handle_log_artifacts(
@@ -240,74 +239,75 @@ def handle_restore_artifact(store: DataStore[...], artifact_id: int, actor: mode
 # actually used.
 
 
-def whoami() -> dict[str, Any]:
+def whoami() -> Response:
     """Who this request was authenticated as, plus this server's version -- the client's handshake."""
     user = get_current_user()
-    return Identity(
-        id=user.id,
-        username=user.username,
-        server_version=__version__,
-        run_id=find_run_scope(),
-        # Every app takes them: `dlboard.serve._backend._compression`.
-        accepted_encodings=tuple(ContentEncoding),
-    ).model_dump(mode="json")
+    return answer(
+        Identity(
+            id=user.id,
+            username=user.username,
+            server_version=__version__,
+            run_id=find_run_scope(),
+            # Every app takes them: `dlboard.serve._backend._compression`.
+            accepted_encodings=tuple(ContentEncoding),
+        )
+    )
 
 
-def log_batch() -> dict[str, str]:
-    """Log a batch of metrics."""
-    batch = Tally((models.LoggedMetrics.model_validate(metric) for metric in request.json), weigh=_values_in)
+def log_batch() -> Response:
+    """Log a batch of metrics, each validated as it is stored (a list of `LoggedMetrics`)."""
+    sent = _BATCH.validate_python(request.json)
+    batch = Tally((models.LoggedMetrics.model_validate(metric) for metric in sent), weigh=_values_in)
     get_data_store().log_metrics(batch)
     _METRIC_VALUES.add(batch.total)
-    return {}
+    return answer()
 
 
-def log_hyperparams() -> dict[str, str]:
+def log_hyperparams() -> Response:
     """Log the hyperparameters for an experiment."""
-    hyperparams = models.NewHyperParams.model_validate(request.json)
-    return get_data_store().log_hyperparams(hyperparams).model_dump(mode="json")
+    return answer(get_data_store().log_hyperparams(body(models.NewHyperParams)))
 
 
-def record_run_context() -> dict[str, Any]:
+def record_run_context() -> Response:
     """Record what produced a run: its commit, command, packages and machine. A run keeps the first one."""
-    context = models.NewRunContext.model_validate(request.json)
-    return get_data_store().record_run_context(context).model_dump(mode="json")
+    return answer(get_data_store().record_run_context(body(models.NewRunContext)))
 
 
-def create_experiment() -> dict[str, Any]:
+def create_experiment() -> Response:
     """Create a new experiment for a project."""
-    return handle_create_experiment(get_data_store(), request.json, get_current_user())
+    return answer(handle_create_experiment(get_data_store(), body(models.NewExperiment), get_current_user()))
 
 
-def create_run() -> dict[str, Any]:
+def create_run() -> Response:
     """Create a new run for an experiment."""
-    return handle_create_run(get_data_store(), request.json, get_current_user())
+    return answer(handle_create_run(get_data_store(), body(models.NewRun), get_current_user()))
 
 
-def get_run(entity_id: int) -> dict[str, Any]:
+def get_run(entity_id: int) -> Response:
     """Look up an existing run by id."""
-    return handle_get_run(get_data_store(), entity_id)
+    return answer(handle_get_run(get_data_store(), entity_id))
 
 
-def finish_run(entity_id: int) -> dict[str, Any]:
+def finish_run(entity_id: int) -> Response:
     """A run's client reports it is done (finished or failed)."""
-    return handle_finish_run(get_data_store(), entity_id, request.json)
+    return answer(handle_finish_run(get_data_store(), entity_id, body(FinishRun)))
 
 
-def mark_run(entity_id: int) -> dict[str, Any]:
+def mark_run(entity_id: int) -> Response:
     """A run's client pins and/or keeps it, as it is launched."""
-    return handle_mark_run(get_data_store(), entity_id, request.json, get_current_user())
+    return answer(handle_mark_run(get_data_store(), entity_id, body(MarkRun), get_current_user()))
 
 
-def heartbeat(entity_id: int) -> dict[str, Any]:
+def heartbeat(entity_id: int) -> Response:
     """A run's client says it is alive, between batches. 404 for a run that is gone, as `handle_get_run`."""
     store = get_data_store()
     if store.get_run(entity_id) is None:
         raise NotFound
     store.heartbeat(entity_id)
-    return {}
+    return answer()
 
 
-def run_token(entity_id: int) -> dict[str, Any]:
+def run_token(entity_id: int) -> Response:
     """A run token for run `entity_id`, as the request's user: for a job to log to the run with, and nothing else."""
     store = get_data_store()
     if store.get_run(entity_id) is None:
@@ -316,25 +316,29 @@ def run_token(entity_id: int) -> dict[str, Any]:
     expires_at = token.expires_at
     if expires_at is None:  # `mint_run_token` always sets it
         raise ValueError(token)
-    return RunToken(token=raw, run_id=entity_id, expires_at=expires_at).model_dump(mode="json")
+    return answer(RunToken(token=raw, run_id=entity_id, expires_at=expires_at))
 
 
-def create_project() -> dict[str, Any]:
+def create_project() -> Response:
     """Create a new project."""
-    return handle_create_project(get_data_store(), request.json, get_current_user())
+    return answer(handle_create_project(get_data_store(), body(models.NewProject), get_current_user()))
 
 
-def get_or_create_project() -> dict[str, Any]:
+def get_or_create_project() -> Response:
     """Get or create a project by name."""
-    return handle_get_or_create_project(get_data_store(), request.json, get_current_user())
+    return answer(
+        handle_get_or_create_project(get_data_store(), body(GetOrCreateProject), get_current_user())
+    )
 
 
-def get_or_create_experiment() -> dict[str, Any]:
+def get_or_create_experiment() -> Response:
     """Get or create an experiment by name within a project."""
-    return handle_get_or_create_experiment(get_data_store(), request.json, get_current_user())
+    return answer(
+        handle_get_or_create_experiment(get_data_store(), body(GetOrCreateExperiment), get_current_user())
+    )
 
 
-def log_artifact() -> dict[str, str]:
+def log_artifact() -> Response:
     """Log an artifact with metadata and files."""
     t0 = perf_counter()
     pairs = Tally(
@@ -351,29 +355,29 @@ def log_artifact() -> dict[str, str]:
         _ARTIFACT_BYTES.add(request.content_length or 0)
     finally:
         _log.debug("logging artifacts took %.3f seconds", perf_counter() - t0)
-    return {}
+    return answer()
 
 
-def link_artifact() -> dict[str, str]:
+def link_artifact() -> Response:
     """Register a batch of already-stored artifacts by ref, with no bytes uploaded."""
-    links = [models.NewArtifactLink.model_validate(item) for item in request.json]
+    links = _LINKS.validate_python(request.json)
     handle_link_artifacts(get_data_store(), get_artifact_store(), links, get_current_user())
-    return {}
+    return answer()
 
 
 def _entity_route(
     change: Callable[[DataStore[...], int, models.User], None],
-) -> Callable[[int], dict[str, str]]:
+) -> Callable[[int], Response]:
     """The route that makes `change` (a delete or a restore) to the entity its path names, as the request's user."""
 
-    def route(entity_id: int) -> dict[str, str]:
+    def route(entity_id: int) -> Response:
         change(get_data_store(), entity_id, get_current_user())
-        return {}
+        return answer()
 
     return route
 
 
-_ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
+_ROUTES: tuple[tuple[str, list[str], Callable[..., Response]], ...] = (
     (WHOAMI_PATH, ["GET"], whoami),
     (create_path(Resource.METRICS), ["POST"], log_batch),
     (create_path(Resource.HYPERPARAMS), ["POST"], log_hyperparams),
