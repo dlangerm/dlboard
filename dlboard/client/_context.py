@@ -14,6 +14,7 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Final, Protocol, cast
@@ -75,17 +76,43 @@ class Diff(BaseModel, frozen=True, extra="forbid"):
         return new, path
 
 
-def _git(*args: str) -> bytes | None:
-    """`git <args>`'s output in the working directory, or `None` if there is no git, no repository, or it failed."""
+def _git(*args: str, most: int | None = None) -> bytes | None:
+    """
+    `git <args>`'s output in the working directory, or `None` if there is no git, no repository, or it failed.
+
+    At most `most` bytes and one more of it are read, so an output over `most` is known to be without holding it all:
+    it goes to a file, not a pipe, so `git` never waits on a reader that stopped.
+    """
     try:
-        return subprocess.run(
-            ["git", *args],
-            capture_output=True,
-            timeout=_GIT_TIMEOUT_SEC,
-            check=True,
-        ).stdout
+        with tempfile.TemporaryFile() as output:
+            subprocess.run(
+                ["git", *args],
+                stdout=output,
+                stderr=subprocess.DEVNULL,
+                timeout=_GIT_TIMEOUT_SEC,
+                check=True,
+            )
+            output.seek(0)
+            return output.read() if most is None else output.read(most + 1)
     except (OSError, subprocess.SubprocessError):
         return None
+
+
+def _dirty() -> bool | None:
+    """Whether tracked files have changes not committed, by `git diff --quiet`'s exit code; `None` if git can't say."""
+    try:
+        status = subprocess.run(
+            ["git", "diff", "--quiet", "HEAD"], capture_output=True, timeout=_GIT_TIMEOUT_SEC, check=False
+        ).returncode
+    except (OSError, subprocess.SubprocessError):
+        return None
+    match status:
+        case 0:
+            return False
+        case 1:
+            return True
+        case _:
+            return None
 
 
 def _text(output: bytes | None) -> str | None:
@@ -161,7 +188,7 @@ def collect(
 ) -> tuple[models.NewRunContext, Diff | None]:
     """What produced this run, as far as `settings` allows; plus its uncommitted changes, when there are some to log."""
     commit = _text(_git("rev-parse", "HEAD")) if settings.git else None
-    changes = _git("diff", "HEAD", "--no-color", "--no-ext-diff") if commit is not None else None
+    dirty = _dirty() if commit is not None else None
     remote = _text(_git("remote", "get-url", "origin")) if commit is not None else None
     gpus, cuda_version = _cuda()
     context = models.NewRunContext(
@@ -170,7 +197,7 @@ def collect(
         git_commit=commit,
         git_branch=_text(_git("symbolic-ref", "--short", "-q", "HEAD")) if commit is not None else None,
         git_remote=None if remote is None else without_credentials(remote),
-        git_dirty=None if changes is None else bool(changes),
+        git_dirty=dirty,
         command=list(sys.argv) if settings.command else [],
         cwd=str(Path.cwd()) if settings.command else None,
         executable=sys.executable if settings.command else None,
@@ -181,16 +208,18 @@ def collect(
         gpus=gpus,
         cuda_version=cuda_version,
     )
-    return context, _diff(changes, settings)
+    return context, _diff(settings) if dirty else None
 
 
-def _diff(changes: bytes | None, settings: ContextSettings) -> Diff | None:
-    """The changes to upload, or `None`: none to log, not asked for, or over `max_diff_kb` (which is warned about)."""
-    if not changes or not settings.diff:
+def _diff(settings: ContextSettings) -> Diff | None:
+    """The changes to upload, or `None`: not asked for, gone, or over `max_diff_kb` (which is warned about)."""
+    most = settings.max_diff_kb * _KB
+    changes = _git("diff", "HEAD", "--no-color", "--no-ext-diff", most=most) if settings.diff else None
+    if not changes:
         return None
-    if len(changes) > settings.max_diff_kb * _KB:
+    if len(changes) > most:
         warn(
-            f"dlboard left this run's uncommitted changes out: the diff is {len(changes) // _KB} KB, over "
+            "dlboard left this run's uncommitted changes out: the diff is over "
             f"DLBOARD_CONTEXT_MAX_DIFF_KB ({settings.max_diff_kb})."
         )
         return None

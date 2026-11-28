@@ -337,6 +337,19 @@ def _http_error(status: int) -> requests.HTTPError:
 
 
 @pytest.mark.parametrize(
+    "error", [requests.ConnectionError("down"), _http_error(500)], ids=["down", "refused"]
+)
+def test_hyperparameters_the_server_cannot_take_never_fail_the_script(
+    fake_api: FakeAPI, started: run.Run, error: requests.RequestException
+) -> None:
+    """Lightning logs them as `fit` starts: a server blip then must not end the training run."""
+    fake_api.hparams_error = error
+
+    with pytest.warns(UserWarning, match="could not record this run's hyperparameters"):
+        started.log_hyperparams({"lr": 0.1})
+
+
+@pytest.mark.parametrize(
     ("failure", "kind"),
     [
         (requests.ConnectionError(), Failure.TRANSIENT),
@@ -441,6 +454,32 @@ def test_shipper_starts_a_process_that_died_again_rather_than_fail_training() ->
 
     assert shipper.worker is second
     assert second.queue.get_nowait() == "b"
+
+
+def test_threads_that_find_the_process_dead_at_once_start_it_again_once() -> None:
+    """The training loop, the system sampler and the console capture all put: one restart, and nothing left behind."""
+    first = _worker()
+    spares = [_worker() for _ in range(8)]
+    workers = iter([first, *spares])
+
+    def start() -> run._Worker[str]:
+        time.sleep(0.02)  # long enough for every thread to find the process dead before the restart is done
+        return next(workers)
+
+    shipper = run._Shipper("test", start)
+    _killed(first)
+    shipper.started_at -= run._RESTART_INTERVAL_SEC
+    putting = [threading.Thread(target=shipper.put, args=(str(i),)) for i in range(8)]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for thread in putting:
+            thread.start()
+        for thread in putting:
+            thread.join()
+
+    assert shipper.worker is spares[0]
+    assert {spares[0].queue.get_nowait() for _ in range(8)} == {str(i) for i in range(8)}
+    assert all(spare.queue.empty() for spare in spares)
 
 
 def test_shipper_flush_gives_up_at_its_deadline_and_says_what_the_server_refused() -> None:

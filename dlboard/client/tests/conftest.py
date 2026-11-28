@@ -27,6 +27,7 @@ class FakeAPI:
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.finish_error: Exception | None = None
         self.context_error: Exception | None = None
+        self.hparams_error: Exception | None = None
         self.diff: Diff | None = None
         """What `_context.collect` finds uncommitted, for every run started in the test (nothing, by default)."""
         self.samplers: list[FakeSampler] = []
@@ -103,6 +104,8 @@ class FakeAPI:
 
     def log_hyperparams(self, hparams: models.NewHyperParams) -> models.HyperParams:
         self.calls.append(("log_hyperparams", (hparams.hparams_dict,), {}))
+        if self.hparams_error is not None:
+            raise self.hparams_error
         return models.HyperParams(id=1, **hparams.model_dump())
 
     def called(self, name: str) -> list[tuple[Any, ...]]:

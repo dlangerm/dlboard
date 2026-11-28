@@ -21,6 +21,7 @@ import functools
 import json
 import signal
 import tempfile
+import threading
 import time
 import weakref
 from argparse import Namespace
@@ -201,6 +202,12 @@ class _Shipper(Generic[T]):
     _dropped_since_warning: int = field(default=0, init=False)
     _last_drop_warning: float = field(default=0.0, init=False)
     _refused_reported: int = field(default=0, init=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
+    """
+    Held while a dead process is noticed and started again, and while a drop is counted: the training loop, the system
+    metrics sampler and the console capture all put from threads of their own, and two of them finding the process dead
+    at once must start one, not two.
+    """
 
     def __post_init__(self) -> None:
         self.worker, self.started_at = self.start(), time.monotonic()
@@ -213,19 +220,22 @@ class _Shipper(Generic[T]):
         dies holding the old one's lock), at most once every `_RESTART_INTERVAL_SEC`; until then, and whenever the
         queue is full (the process can't keep up, or the server/network is down), `item` is dropped and counted,
         warning at most once every `_DROP_WARNING_INTERVAL_SEC` while it keeps happening, plus a final total once
-        the run is flushed.
+        the run is flushed. Safe to call from any thread.
         """
-        if not self.worker.process.is_alive() and not self._restart():
-            self._drop("its shipping process died, and is started again shortly")
-            return
+        with self._lock:
+            if not self.worker.process.is_alive() and not self._restart():
+                self._drop("its shipping process died, and is started again shortly")
+                return
+            worker = self.worker
         try:
-            self.worker.queue.put_nowait(item)
+            worker.queue.put_nowait(item)
             self.unflushed = True
         except Full:
-            self._drop(
-                "its queue is full -- the shipping process can't keep up, or the server/network is down; see "
-                "`RunSettings` to size the queue, or check the server"
-            )
+            with self._lock:
+                self._drop(
+                    "its queue is full -- the shipping process can't keep up, or the server/network is down; see "
+                    "`RunSettings` to size the queue, or check the server"
+                )
 
     def _restart(self) -> bool:
         """Start the dead process again, unless it was started too recently; whether it was."""
@@ -272,6 +282,7 @@ class _Shipper(Generic[T]):
 
         Something the server refused for good counts as gone, and is warned about here; so is what was dropped.
         """
+        began = time.monotonic()
         if self._dropped_total:
             warn(
                 f"dlboard dropped {self._dropped_total} {self.name} item(s) during this run -- see the warnings above for when."
@@ -291,7 +302,7 @@ class _Shipper(Generic[T]):
         self._report_refused()
         if not shipped:
             warn(
-                f"dlboard's {self.name} still hadn't all been shipped after {_FLUSH_TIMEOUT_SEC}s -- "
+                f"dlboard's {self.name} still hadn't all been shipped after {time.monotonic() - began:.0f}s -- "
                 "anything not yet shipped is lost if this process exits now."
             )
             return False
@@ -723,14 +734,20 @@ class Run:
         `128`); that's the usual cause of a hyperparameter column that looks numeric but sorts/compares as text.
 
         A run keeps the first hyperparameters logged to it. Logging others later (a second stage, or another process
-        sharing the run) changes nothing, and warns.
+        sharing the run) changes nothing, and warns. Sent at once, not queued, so that it can say so; a server that is
+        down or refuses them never fails the script, but warns that they were not recorded.
         """
         if (shipping := self._shipping) is None:
             return
         sent = models.NewHyperParams.from_raw(
             run_id=shipping.run_id, experiment_id=shipping.experiment_id, hparams=flatten_hparams(params)
         )
-        if shipping.api.log_hyperparams(sent).hparams_dict != sent.hparams_dict:
+        try:
+            kept = shipping.api.log_hyperparams(sent)
+        except requests.RequestException as exc:
+            warn(f"dlboard could not record this run's hyperparameters: {exc}")
+            return
+        if kept.hparams_dict != sent.hparams_dict:
             warn(
                 f"dlboard run {shipping.run_id} already has hyperparameters, which it keeps: these were not "
                 "recorded. Log every hyperparameter in one call, or give each process its own run."
