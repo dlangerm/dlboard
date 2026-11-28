@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+import os
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
@@ -125,7 +126,12 @@ def _build_metrics() -> Metrics | None:
     # Deferred: the SDK is only imported once telemetry is on.
     from dlboard.serve.telemetry._sdk import build_metrics
 
-    return build_metrics(settings)
+    metrics = build_metrics(settings)
+    for (
+        gauge
+    ) in _OBSERVED:  # made with the meter: `observe` must never be what builds one (see the module docstring)
+        gauge.made_on(metrics.meter)
+    return metrics
 
 
 def _build_logs() -> Logs | None:
@@ -200,6 +206,10 @@ class OutcomeAttributes(Attributes):
 
 class _Adder(Protocol):
     def add(self, amount: float, attributes: OtelAttributes = None) -> None: ...
+
+
+class _Observed(Protocol):
+    """An SDK observable gauge: nothing is called on it; its callback is read whenever its readers collect."""
 
 
 class _Recorder(Protocol):
@@ -288,6 +298,64 @@ class Histogram[A: Attributes](_Instrument[_Recorder]):
                 instrument.record(amount, None if attributes is None else attributes.as_otel())
         except Exception:  # noqa: BLE001 -- see the class docstring
             self._failed()
+
+
+type Level[A: Attributes] = tuple[float, A | None]
+"""One series of an `ObservedGauge` as it is now: its value, and the labels that pick it out (`None`: the only one)."""
+
+
+class ObservedGauge[A: Attributes](_Instrument[_Observed]):
+    """
+    A level read each time metrics are collected (a queue's depth, connections in use): measured, never counted.
+
+    An `UpDownCounter` of the same would drift for good whenever a process died between its `+1` and its `-1`; a level
+    read from what holds it can't. A process says how to read its own (`observe`), and only its own reads are reported
+    from it: `/metrics` adds every process up, and leaves out a dead one's gauges. Made on a process's meter as that is
+    built, so a gauge must be defined at import, as every instrument is, before its process records anything.
+    """
+
+    def __init__(self, name: str, unit: Unit, description: str) -> None:
+        """A gauge nothing reads yet: each process that holds its levels says how to read them (`observe`)."""
+        super().__init__(name, unit, description)
+        self._reads: list[tuple[int, Callable[[], Iterable[Level[A]]]]] = []
+        _OBSERVED.append(self)
+
+    @override
+    def _create(self, meter: Meter) -> _Observed:
+        from dlboard.serve.telemetry._sdk import (
+            observable_gauge,  # the SDK is only imported once telemetry is on
+        )
+
+        return observable_gauge(meter, self._name, self._unit, self._description, self._levels)
+
+    def made_on(self, meter: Meter) -> None:
+        """Make the gauge on `meter`, this process's, as it is built."""
+        try:
+            self._cache = (meter, self._create(meter))
+        except Exception:  # noqa: BLE001 -- see `_Instrument`
+            self._failed()
+
+    def observe(self, read: Callable[[], Iterable[Level[A]]]) -> None:
+        """Have `read` say this gauge's levels in this process (one per series) whenever its metrics are collected."""
+        self._reads.append((os.getpid(), read))
+
+    def _levels(self) -> list[tuple[float, OtelAttributes]]:
+        """Every level this process's reads say now: a read that fails is left out, and logged once."""
+        levels: list[tuple[float, OtelAttributes]] = []
+        for owner, read in self._reads:
+            if owner != os.getpid():  # a parent's, from before a fork: what it reads is the parent's
+                continue
+            try:
+                levels.extend(
+                    (value, None if labels is None else labels.as_otel()) for value, labels in read()
+                )
+            except Exception:  # noqa: BLE001 -- see `_Instrument`
+                self._failed()
+        return levels
+
+
+_OBSERVED: Final[list[ObservedGauge[Any]]] = []
+"""Every `ObservedGauge` defined: each is made on a process's meter as that is built (`_build_metrics`)."""
 
 
 @contextmanager

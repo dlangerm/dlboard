@@ -394,7 +394,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Uploads answered for but not yet written and recorded: the depth of the artifact queues. A worker turns uploads away (queue_full) once it holds DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE or DLBOARD_S3_QUEUE_SIZE (100 by default). Pushed over OTLP, each worker is a series of its own, and the busiest worker's line reaching that is the limit. Scraped from /metrics, the workers are added up, both lines are the total, and the limit is the queue size times the number of workers. Above zero with no uploads coming in, the store is refusing writes.",
+      "description": "Uploads answered for but not yet written and recorded: the depth of the artifact queues. A worker turns uploads away (queue_full) once it holds DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE or DLBOARD_S3_QUEUE_SIZE (100 by default). Pushed over OTLP, each worker is a series of its own, and the busiest worker's line reaching that is the limit. Scraped from /metrics, the workers are added up, both lines are the total, and the limit is the queue size times the number of workers. Above zero with no uploads coming in, the store is refusing writes. Where they wait says which is behind: to write (the object store or disk), to retry (writes the store refused), or to ingest (the database recording their refs).",
       "fieldConfig": {
         "defaults": {
           "unit": "none"
@@ -418,9 +418,14 @@
           "expr": "sum(dlboard_artifact_uploads_held{job=~\"$job\", deployment_environment=~\"$environment\"})",
           "legendFormat": "every worker",
           "refId": "B"
+        },
+        {
+          "expr": "sum by (dlboard_artifact_stage) (dlboard_artifact_queue_depth{job=~\"$job\", deployment_environment=~\"$environment\"})",
+          "legendFormat": "waiting to {{dlboard_artifact_stage}}",
+          "refId": "C"
         }
       ],
-      "title": "Uploads held, not yet written",
+      "title": "Uploads held, and where they wait",
       "type": "timeseries"
     },
     {

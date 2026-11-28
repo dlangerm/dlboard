@@ -22,7 +22,7 @@ from werkzeug.datastructures import FileStorage
 
 from dlboard import models
 from dlboard.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend
-from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, _waited_since, blob_key
+from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, _Stage, _waited_since, blob_key
 from dlboard.plugins.data_stores.filesystem import FSBlobs
 from dlboard.plugins.data_stores.tests.conftest import file, ingest, rejections, upload, wait_until
 
@@ -204,6 +204,26 @@ def test_a_rejected_artifact_is_dropped_alone_and_its_blob_deleted(
     wait_until(lambda: artifact_store._journal.held() == [])
     assert [a.run_id for a in store.fetch_artifacts(experiment_id, run_ids=None)] == [kept_run.id]
     assert not blobs.exists(blobs.ref_for(blob_key(experiment_id, deleted_run.id, "img", 0, "orphan.png")))
+
+
+def test_written_uploads_wait_at_the_ingest_stage_until_their_refs_are_recorded(
+    store: SQLLiteStore, experiment_id: int, tmp_path: Path, make_blob_store: MakeBlobStore
+) -> None:
+    """The depth of each stage is what is in it now: where uploads are, when they back up, says which part is behind."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    artifact_store = make_blob_store(FSBlobs(tmp_path / "artifacts"), 10)
+
+    def depths() -> dict[_Stage, float]:
+        return {labels.stage: value for value, labels in artifact_store.queue_depths() if labels is not None}
+
+    for i in range(3):
+        upload(artifact_store, run, f"{i}.png")
+    wait_until(lambda: depths() == {_Stage.WRITE: 0, _Stage.INGEST: 3})  # written; nothing records them yet
+    ingest(artifact_store, store)
+    wait_until(lambda: depths() == {_Stage.WRITE: 0, _Stage.INGEST: 0})
+    artifact_store.dispose()
+
+    assert artifact_store.queue_depths() == []
 
 
 # -- Shutdown and staging -------------------------------------------------------------------------
