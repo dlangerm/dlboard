@@ -282,7 +282,7 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
         # Each click's callback bases its mutation on the client-side page-state snapshot, so the
         # next click must wait for this one's response to land first -- otherwise the second
         # request reads a stale (pre-mutation) snapshot and its response clobbers the first.
-        expect(page.get_by_role("button", name=panel_name)).to_be_visible()
+        expect(page.get_by_role("button", name=panel_name, exact=True)).to_be_visible()
 
     # "keep" (created first) starts open -- nothing in the URL says which panels are open yet for a
     # brand new experiment, so `Paging.opened`'s own fallback opens the first panel
@@ -413,7 +413,7 @@ def test_drag_and_drop_reorders_panels(page: Page, live_server_url: str, console
 
     for panel_name in ("alpha", "beta", "gamma"):
         _create_panel(page, panel_name)
-        expect(page.get_by_role("button", name=panel_name)).to_be_visible()
+        expect(page.get_by_role("button", name=panel_name, exact=True)).to_be_visible()
 
     assert _panel_order(page) == ["alpha", "beta", "gamma"]
 
@@ -687,7 +687,7 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
 
     for panel_name in ("keep", "tabbed"):
         _create_panel(page, panel_name)
-        expect(page.get_by_role("button", name=panel_name)).to_be_visible()
+        expect(page.get_by_role("button", name=panel_name, exact=True)).to_be_visible()
 
     # No tabs assigned yet -- every panel shares the one default tab, so there's no tab bar at all,
     # just the lone "+" button that's always available to start one.
@@ -710,7 +710,7 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
 
     # Creating a tab jumps straight to it: "tabbed" is visible, "keep" (still on "General") isn't.
     expect(page.get_by_role("button", name="tabbed")).to_be_visible()
-    expect(page.get_by_role("button", name="keep")).not_to_be_visible()
+    expect(page.get_by_role("button", name="keep", exact=True)).not_to_be_visible()
 
     # The rename-tab icon is disabled on "General" -- nothing there to rename.
     rename_tab_button = page.locator(f"#{RENAME_TAB_BUTTON_ID}")
@@ -718,7 +718,7 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
 
     # Switching back to "General" is exactly the flow that used to be impossible.
     general_tab.click()
-    expect(page.get_by_role("button", name="keep")).to_be_visible()
+    expect(page.get_by_role("button", name="keep", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="tabbed")).not_to_be_visible()
     expect(rename_tab_button).to_be_disabled()
 
@@ -730,7 +730,7 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
     page.wait_for_timeout(200)  # matches the drag tests' own wait for the hover-reveal transition
     keep_handle.drag_to(images_tab)
     expect(page.get_by_role("button", name="tabbed")).to_be_visible()
-    expect(page.get_by_role("button", name="keep")).to_be_visible()
+    expect(page.get_by_role("button", name="keep", exact=True)).to_be_visible()
 
     # Rename the active tab ("Images") -- both panels that were on it follow the rename.
     rename_tab_button.click()
@@ -739,13 +739,13 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
     expect(page.get_by_role("tab", name="Screenshots")).to_be_visible()
     expect(page.get_by_role("tab", name="Images")).to_have_count(0)
     expect(page.get_by_role("button", name="tabbed")).to_be_visible()
-    expect(page.get_by_role("button", name="keep")).to_be_visible()
+    expect(page.get_by_role("button", name="keep", exact=True)).to_be_visible()
 
     # The grouping, the rename, and which tab was active all survive a reload.
     page.reload()
     expect(page.get_by_role("tab", name="Screenshots")).to_be_visible()
     expect(page.get_by_role("button", name="tabbed")).to_be_visible()
-    expect(page.get_by_role("button", name="keep")).to_be_visible()
+    expect(page.get_by_role("button", name="keep", exact=True)).to_be_visible()
 
     assert console_errors == []
 
@@ -956,7 +956,7 @@ def test_switching_tabs_does_not_remount_the_navbar_run_table(
 
     for panel_name in ("keep", "tabbed"):
         _create_panel(page, panel_name)
-        expect(page.get_by_role("button", name=panel_name)).to_be_visible()
+        expect(page.get_by_role("button", name=panel_name, exact=True)).to_be_visible()
 
     page.locator(f"#{NEW_TAB_BUTTON_ID}").click()
     page.get_by_role("dialog").get_by_role("textbox").first.fill("Images")
