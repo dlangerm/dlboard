@@ -11,6 +11,38 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Someone removed from the identity provider can't go on with their tokens.**
+  Set `DLBOARD_TOKEN_IDLE_DAYS`, and a user's API and run tokens stop working once they haven't signed in for that many days; Admin → Users shows when each person last signed in.
+  An admin made by `DLBOARD_ADMIN_GROUPS` alone stops being one the first time they sign in without the group, while one made by name or by hand is kept ([docs/plugins/auth.md](docs/plugins/auth.md)).
+* **The metrics say where an upload, a database connection and a webhook are.**
+  The upload panel shows how many wait to be written, retried and recorded, so you can see whether the object store or the database is behind.
+  A new Database row shows Postgres connections in use and idle, and the requests that waited too long for one.
+  A Webhooks row shows what became of each delivery, how long posts take, and posts refused for their address; see [docs/telemetry.md](docs/telemetry.md).
+* **A run charts its own shipping queues.**
+  Beside CPU and GPU, a run's system metrics show how full each of its queues to the server was and how much it dropped (`system/dlboard.metrics.queue_depth`, ...), with no extra installed, so you can size `RunSettings` from data.
+
+### Changed
+
+* **A request that waits out the Postgres pool is a 503, not a 500.**
+  A client tries it again, and a person is told the database is busy.
+* **The Trash says when a purge is under way.**
+  A project whose purge you asked for shows **Purging…** until it is gone, instead of looking untouched with its Restore button still there.
+
+### Fixed
+
+* **A blip of the server can't end a training run.**
+  `log_hyperparams`, which Lightning calls as `fit` starts, raised when the server didn't answer; it warns now, as everything else a run sends does.
+  A run's system metrics also keep sampling after a sample that failed, and a shipping process that died is started again only once, however many threads find it dead.
+* **An interrupted `dlboard sync` or TensorBoard import goes on without duplicating anything.**
+  One stopped partway (killed, or the server gone) could make a run twice, or log an event file's steps twice; each now saves how far it got after every batch, and writes that state whole or not at all.
+  A record that can never be sent is skipped with a warning naming where it is, instead of stopping the folder at it on every pass, and `--watch` (and `serve local --logdir`) go on after a pass that fails.
+* **A webhook receiver can't hold up everyone's webhooks.**
+  A post now waits twice `DLBOARD_WEBHOOK_TIMEOUT_S` at the most, and reads only the answer's status: a receiver that answered a byte at a time used to keep the delivery task, and every project's posts behind it, waiting for as long as it went on.
+* **A run's uncommitted diff is never read whole into memory** to find it is over `DLBOARD_CONTEXT_MAX_DIFF_KB`.
+* **Confirming a purge goes back to the Trash under a URL prefix** too.
+
 ## [0.21.0] - 2026-11-27
 
 ### Added
