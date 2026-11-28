@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import typing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
@@ -192,6 +191,14 @@ def _signature(rows: list[dict[str, Any]], offered: Sequence[object], *, can_edi
     ).hexdigest()
 
 
+def _project_of(page: page_model.BasicExperimentPage) -> int:
+    """The project a comparison is of: every comparison is one project's, which it is stored under."""
+    if page.project_id is None:
+        msg = f"page {page.id} is not a project's comparison"
+        raise ValueError(msg)
+    return page.project_id
+
+
 def render_members(
     store: DataStore[...],
     page: page_model.BasicExperimentPage,
@@ -208,7 +215,7 @@ def render_members(
     runs = store.comparison_runs(page.id)
     pins = pin_cells_by_run(store, [run.id for run in runs], get_current_user().id)
     can_edit = store.can_change_comparison_runs(page.id)
-    project_id = typing.cast("int", page.project_id)
+    project_id = _project_of(page)
     addable = addable_comparisons(store, project_id)
     counts = store.pin_counts(project_id)
     rows = _rows(store, runs, page, hidden, pins)
@@ -415,7 +422,7 @@ def _compare(request: RunActionRequest, act: _Act) -> _Outputs:
     editable = get_data_store().can_change_comparison_runs(page.id)
     compared = compare(
         request,
-        project_id=typing.cast("int", page.project_id),
+        project_id=_project_of(page),
         layout=page,
         here=page.id if editable else None,
     )
