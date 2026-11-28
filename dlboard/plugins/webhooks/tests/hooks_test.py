@@ -19,7 +19,9 @@ from pydantic import HttpUrl
 from werkzeug.serving import make_server
 
 from dlboard import models
+from dlboard.conftest import scraped_total
 from dlboard.plugins.webhooks._hooks import (
+    AddressRefusedError,
     Failure,
     Named,
     ProjectWebhooks,
@@ -34,6 +36,7 @@ from dlboard.plugins.webhooks._hooks import (
 )
 from dlboard.plugins.webhooks._tab import checked
 from dlboard.serve import SettingWrite
+from dlboard.serve.telemetry._prometheus import serve_metrics
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -220,6 +223,25 @@ def test_a_receiver_that_trickles_its_answer_holds_a_post_no_longer_than_its_dea
                 send(hook, _payload(), uuid.uuid4())
             assert refused.value.failure is Failure.RETRY
         assert time.monotonic() - started < 3
+
+
+def test_a_post_not_made_for_its_address_is_counted(telemetry: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """#820: an operator sees a webhook aimed at an address no admin allowed, not only its owner, on the tab."""
+    telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
+    telemetry.setenv("DLBOARD_TELEMETRY_PROMETHEUS_DIR", str(tmp_path))
+    hook = Webhook(
+        url=HttpUrl("http://127.0.0.1:9/hook"),
+        events=frozenset(WebhookEvent),
+        link_base=HttpUrl("https://d/"),
+        created_by=1,
+    )
+
+    with pytest.raises(AddressRefusedError):
+        send(hook, _payload(), uuid.uuid4())
+
+    assert (
+        scraped_total(serve_metrics().get_data(as_text=True), "dlboard_webhook_refused_addresses_total") == 1
+    )
 
 
 def _answer(_environ: WSGIEnvironment, start_response: StartResponse) -> list[bytes]:

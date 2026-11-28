@@ -49,6 +49,7 @@ from dlboard import models
 from dlboard._compat import StrEnum
 from dlboard._version import __version__
 from dlboard.serve import CommaSeparated
+from dlboard.serve.telemetry import Counter, Histogram, NoAttributes, Outcome, OutcomeAttributes, Unit
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -323,6 +324,22 @@ class RefusedError(ValueError):
         self.failure = failure
 
 
+class AddressRefusedError(RefusedError):
+    """A URL whose host resolves to an address a webhook may not post to (not public, and not allowed by an admin)."""
+
+
+_POSTS = Histogram[OutcomeAttributes](
+    "dlboard.webhook.post.duration",
+    Unit.SECONDS,
+    "How long each webhook post took, until it was answered or given up on, by whether it landed.",
+)
+_REFUSED_ADDRESSES = Counter[NoAttributes](
+    "dlboard.webhook.refused_addresses",
+    Unit.ATTEMPTS,
+    "Webhook posts not made because the URL's host resolves to an address that isn't public, and isn't allowed.",
+)
+
+
 def _address(url: HttpUrl) -> IPv4Address | IPv6Address:
     """The address the server posts to for `url`: its host's first, if every one it resolves to may be posted to."""
     host = urlsplit(str(url)).hostname or ""
@@ -338,7 +355,7 @@ def _address(url: HttpUrl) -> IPv4Address | IPv6Address:
     private = [a for a in found if not a.is_global]
     if private and host not in WebhookSettings().allowed_hosts:
         msg = f"{host} resolves to an address that isn't public ({private[0]}): an admin can allow it"
-        raise RefusedError(msg)
+        raise AddressRefusedError(msg)
     return found[0]
 
 
@@ -399,9 +416,26 @@ def send(hook: Webhook, payload: WebhookPayload, delivery_id: uuid.UUID) -> None
 
     A post takes `DLBOARD_WEBHOOK_TIMEOUT_S` twice at the most, to connect and then to be answered, however the
     receiver trickles its answer (a timeout bounds each read, not their sum): one not answered by then is tried again
-    later, and the thread still waiting on it is let go of, so it holds up no other delivery.
+    later, and the thread still waiting on it is let go of, so it holds up no other delivery. Each post is timed, and
+    each one not made for its address counted.
     """
-    address = _address(hook.url)
+    try:
+        address = _address(hook.url)
+    except AddressRefusedError:
+        _REFUSED_ADDRESSES.add(1)
+        raise
+    started, outcome = time.perf_counter(), Outcome.FAILURE
+    try:
+        _post_to(hook, address, payload, delivery_id)
+        outcome = Outcome.SUCCESS
+    finally:
+        _POSTS.record(time.perf_counter() - started, OutcomeAttributes(outcome=outcome))
+
+
+def _post_to(
+    hook: Webhook, address: IPv4Address | IPv6Address, payload: WebhookPayload, delivery_id: uuid.UUID
+) -> None:
+    """`send`'s post itself: to `address`, with its deadline."""
     host = parse_url(str(hook.url)).host
     body = payload.model_dump_json().encode()
     headers = {
