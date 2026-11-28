@@ -25,7 +25,7 @@ from dlboard.serve import (
 )
 from dlboard.serve import _constants as constants
 from dlboard.serve._backend._app_slot import current_dash_app
-from dlboard.serve._backend._purge_work import PurgeWork, entity_purge
+from dlboard.serve._backend._purge_work import PurgeWork, entity_purge, entity_purge_key
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._custodian import TaskStore, get_task_store, registered_tasks
 from dlboard.serve._pages._admin_tasks import render_background_tasks
@@ -84,7 +84,10 @@ _TRASH_KINDS: tuple[tuple[str, models.EntityType], ...] = (
 )
 
 
-def _list_deleted(store: DataStore[...], entity_type: models.EntityType, limit: int) -> Iterable[Any]:
+type _Trashed = models.Project | models.Experiment | models.Run | models.Artifact
+
+
+def _list_deleted(store: DataStore[...], entity_type: models.EntityType, limit: int) -> Iterable[_Trashed]:
     match entity_type:
         case models.EntityType.PROJECT:
             return store.list_deleted_projects(limit=limit)
@@ -108,8 +111,49 @@ def _restore(store: DataStore[...], entity_type: models.EntityType, entity_id: i
             store.restore_artifact(entity_id, actor)
 
 
-def _trash_row(label: str, entity_type: models.EntityType, item: Any) -> Component:  # noqa: ANN401
+def _purge_key(entity_type: models.EntityType, item: _Trashed) -> str | None:
+    """The key `item`'s purge is queued under; `None` for an artifact not stored yet, which the Trash never lists."""
+    return None if item.id is None else entity_purge_key(entity_type, item.id)
+
+
+def _trash_row(label: str, entity_type: models.EntityType, item: _Trashed, *, purging: bool) -> Component:
+    """
+    One entity in the Trash, with its Restore and Purge; or, once its purge is queued, saying so instead.
+
+    A queued purge is the custodian's to finish, a batch at a time: restoring it halfway would bring back part of it, and
+    asking again queues nothing more, so neither is offered while it is under way.
+    """
     deleted_by = f" by user {item.deleted_by}" if item.deleted_by is not None else ""
+    actions = (
+        dmc.Badge("Purging…", color="red", variant="light")
+        if purging
+        else dmc.Group(
+            [
+                dmc.Button(
+                    "Restore",
+                    id={
+                        "type": ADMIN_RESTORE_BUTTON_TYPE,
+                        "entity_type": entity_type.value,
+                        "id": item.id,
+                    },
+                    size="xs",
+                    variant="light",
+                ),
+                dmc.Button(
+                    "Purge",
+                    id={
+                        "type": ADMIN_PURGE_BUTTON_TYPE,
+                        "entity_type": entity_type.value,
+                        "id": item.id,
+                    },
+                    size="xs",
+                    color="red",
+                    variant="light",
+                ),
+            ],
+            gap="xs",
+        )
+    )
     return dmc.Paper(
         dmc.Group(
             [
@@ -120,32 +164,7 @@ def _trash_row(label: str, entity_type: models.EntityType, item: Any) -> Compone
                     ],
                     gap=2,
                 ),
-                dmc.Group(
-                    [
-                        dmc.Button(
-                            "Restore",
-                            id={
-                                "type": ADMIN_RESTORE_BUTTON_TYPE,
-                                "entity_type": entity_type.value,
-                                "id": item.id,
-                            },
-                            size="xs",
-                            variant="light",
-                        ),
-                        dmc.Button(
-                            "Purge",
-                            id={
-                                "type": ADMIN_PURGE_BUTTON_TYPE,
-                                "entity_type": entity_type.value,
-                                "id": item.id,
-                            },
-                            size="xs",
-                            color="red",
-                            variant="light",
-                        ),
-                    ],
-                    gap="xs",
-                ),
+                actions,
             ],
             justify="space-between",
             wrap="nowrap",
@@ -165,9 +184,11 @@ of how much history a single delete touched.
 """
 
 
-def _render_trash_kind(label: str, entity_type: models.EntityType, items: list[Any]) -> Component:
+def _render_trash_kind(
+    label: str, entity_type: models.EntityType, items: list[_Trashed], purging: frozenset[str]
+) -> Component:
     """
-    One grouped section of the trash: a heading, then that kind's rows.
+    One grouped section of the trash: a heading, then that kind's rows, those in `purging` (by purge key) marked so.
 
     Adds a "showing N most recent" note when the page cap was hit.
     """
@@ -175,7 +196,10 @@ def _render_trash_kind(label: str, entity_type: models.EntityType, items: list[A
     return dmc.Stack(
         [
             dmc.Text(heading, fw=700, size="sm", tt="uppercase", c="dimmed"),
-            *[_trash_row(label, entity_type, item) for item in items],
+            *[
+                _trash_row(label, entity_type, item, purging=_purge_key(entity_type, item) in purging)
+                for item in items
+            ],
             *(
                 [
                     dmc.Text(
@@ -222,10 +246,16 @@ def _render_trash(store: DataStore[...], tasks: TaskStore) -> Component:
     banner = _render_pending_purge_banner(tasks)
     if banner is not None:
         sections.append(banner)
-    for label, entity_type in _TRASH_KINDS:
-        items = list(_list_deleted(store, entity_type, limit=_TRASH_PAGE_SIZE_PER_KIND))
+    shown = {
+        (label, entity_type): list(_list_deleted(store, entity_type, limit=_TRASH_PAGE_SIZE_PER_KIND))
+        for label, entity_type in _TRASH_KINDS
+    }
+    # Which of the rows shown have a purge queued: one read of the queue, of those rows' keys alone.
+    keys = (_purge_key(entity_type, item) for (_, entity_type), items in shown.items() for item in items)
+    purging = tasks.queued_keys(PurgeWork.ENTITY, [key for key in keys if key is not None])
+    for (label, entity_type), items in shown.items():
         if items:
-            sections.append(_render_trash_kind(label, entity_type, items))
+            sections.append(_render_trash_kind(label, entity_type, items, purging))
     if not sections:
         return dmc.Text("Nothing in the trash.", c="dimmed")
     return dmc.Stack(sections, gap="lg")
@@ -637,9 +667,9 @@ def _register_purge_callbacks(app: Dash) -> None:
             raise PreventUpdate
         return False
 
-    # Hard-reloads back to `/admin` rather than re-rendering the trash list in place -- keeps this
+    # Hard-reloads back to the Trash rather than re-rendering the trash list in place -- keeps this
     # symmetric with `restore_entity`, and avoids any similar reliance on in-place reconciliation
-    # of dynamically-rendered content.
+    # of dynamically-rendered content. The row it reloads to says its purge is under way.
     @app.callback(
         Output(ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
@@ -665,7 +695,7 @@ def _register_purge_callbacks(app: Dash) -> None:
         except PermissionError as refused:
             _log.exception("Not allowed to purge %s %s", entity_type, entity_id)
             return False, no_update, no_update, notice("Not purged", str(refused), color=NoticeColor.RED)
-        return False, "/admin", True, no_update
+        return False, relative_path("/admin?tab=trash"), True, no_update
 
 
 def _register_user_action_callback(app: Dash) -> None:

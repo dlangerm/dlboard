@@ -250,6 +250,16 @@ class SQLTaskStore:
         ((count,),) = self._execute(sa.select(sa.func.count()).select_from(work).where(work.c.kind == kind))
         return count
 
+    def queued_keys(self, kind: str, keys: Collection[str]) -> frozenset[str]:
+        work = self.tables[WorkItem]
+        return frozenset(
+            key
+            for batch in itertools.batched(sorted(set(keys)), _BATCH)
+            for (key,) in self._execute(
+                sa.select(work.c.key).where(work.c.kind == kind, work.c.key.in_(batch))
+            )
+        )
+
 
 TASK_TABLES: Final[tuple[type[BaseModel], ...]] = (TaskState, Custodian, WorkItem)
 """The tables `SQLTaskStore` keeps its state in, added to every SQL store's schema (`TABLES`)."""
