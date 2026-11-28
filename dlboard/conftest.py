@@ -52,7 +52,7 @@ from dlboard.serve._pages._experiment._panel_data import PanelData, WideHistory
 from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterable, Iterator, MutableMapping
+    from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, MutableMapping
     from wsgiref.types import InputStream, StartResponse, WSGIApplication, WSGIEnvironment
 
     from dash import Dash
@@ -211,11 +211,63 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         action="store_true",
         help="Save this run's per-test durations to test-durations.json, which tiers and orders later runs.",
     )
+    parser.addoption(
+        "--shard",
+        type=Shard.parse,
+        default=None,
+        help="Run only the I-th of N shards of the selected tests (`2/3`), split by their recorded durations.",
+    )
+
+
+def split_into_shards(durations: Mapping[str, float], nodeids: Iterable[str], count: int) -> list[set[str]]:
+    """
+    `nodeids` in `count` shards of about the same recorded time: each, longest first, to the shard with the least so far.
+
+    The same split every time for the same tests and durations, in every shard's run. A test with no recorded duration
+    counts as taking none, so it lands in whichever shard has least then.
+    """
+    shards: list[set[str]] = [set() for _ in range(count)]
+    loads = [0.0] * count
+    for nodeid in sorted(nodeids, key=lambda nodeid: (-durations.get(nodeid, 0.0), nodeid)):
+        least = min(range(count), key=lambda shard: (loads[shard], shard))
+        shards[least].add(nodeid)
+        loads[least] += durations.get(nodeid, 0.0)
+    return shards
+
+
+@dataclass(frozen=True)
+class Shard:
+    """`--shard I/N`: one of N runs that split the selected tests between them (CI's browser job, side by side)."""
+
+    index: int
+    """From 1."""
+    count: int
+
+    @classmethod
+    def parse(cls, text: str) -> Shard:
+        """`I/N`, as `--shard` is given."""
+        index, _, count = text.partition("/")
+        shard = cls(int(index), int(count))
+        if not 1 <= shard.index <= shard.count:
+            msg = f"--shard {text}: I must be between 1 and N"
+            raise ValueError(msg)
+        return shard
+
+    @pytest.hookimpl(trylast=True)
+    def pytest_collection_modifyitems(self, config: pytest.Config, items: list[pytest.Item]) -> None:
+        """Keep this shard's tests, of those `-m`/`-k` left, in the order they were in (short to huge)."""
+        mine = split_into_shards(load_durations(), (item.nodeid for item in items), self.count)[
+            self.index - 1
+        ]
+        config.hook.pytest_deselected(items=[item for item in items if item.nodeid not in mine])
+        items[:] = [item for item in items if item.nodeid in mine]
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Start an empty per-test duration tally for this run."""
+    """Start an empty per-test duration tally for this run, and split it into shards if asked (`--shard`)."""
     config.stash[_MEASURED] = {}
+    if (shard := config.getoption("--shard")) is not None:
+        config.pluginmanager.register(shard, "dlboard-shard")
 
 
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> None:

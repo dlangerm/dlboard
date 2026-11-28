@@ -22,6 +22,7 @@ uv run pytest dlboard/serve/_backend/tests/sql_store_test.py  # run a single tes
 uv run pytest dlboard/serve/_backend/tests/sql_store_test.py::test_name  # run a single test
 uv run pytest --cov                 # run with coverage (see pyproject.toml for config)
 uv run pytest -m browser            # run only the browser/e2e tests
+uv run pytest -m browser --shard=2/3  # only the 2nd of 3 shards split by recorded duration, as CI runs them (`=`, not a space)
 uv run pytest -m "not browser"      # run everything except the browser/e2e tests
 uv run pytest -m postgres           # run the store suites against a real Postgres (needs Docker; testcontainers)
 uv run pytest -m s3                 # run the S3 artifact store against a real S3 endpoint (needs Docker; testcontainers)
