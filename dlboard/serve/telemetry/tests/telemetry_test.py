@@ -10,17 +10,21 @@ from __future__ import annotations
 
 import os
 import subprocess
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import pytest
 import structlog
 
 import dlboard._telemetry as shared
+from dlboard._telemetry import Attributes, attribute
 from dlboard.conftest import scraped_total
 from dlboard.serve.telemetry import (
     METRICS,
     Counter,
     NoAttributes,
+    ObservedGauge,
     Tally,
     TelemetrySettings,
     Unit,
@@ -31,6 +35,8 @@ from dlboard.serve.telemetry._prometheus import serve_metrics
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+
+    from dlboard.serve.telemetry import Level
 
 _CALLS = Counter[NoAttributes]("test.calls", Unit.REQUESTS, "Calls made by a test.")
 
@@ -138,6 +144,44 @@ def test_a_snapshot_already_folded_before_a_crash_is_not_counted_twice(prometheu
 
     assert 'test_widgets_total{kind="a"} 3.0' in _scrape()
     assert [p.name for p in prometheus_dir.glob("*.prom")] == ["retired.prom"]
+
+
+class _Queue(StrEnum):
+    QUEUE = "test.queue"
+
+
+@dataclass(frozen=True, slots=True)
+class _QueueAttributes(Attributes):
+    queue: str = attribute(_Queue.QUEUE)
+
+
+_DEPTH = ObservedGauge[_QueueAttributes]("test.depth", Unit.ITEMS, "What a test's queues hold.")
+
+
+def test_a_gauge_reports_what_this_processs_reads_say_at_each_scrape(
+    prometheus_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Read, not counted: a level changing between scrapes is what the next one says; a parent's read and one that fails aren't."""
+    del prometheus_dir
+    monkeypatch.setattr(_DEPTH, "_reads", [])
+    held = {"a": 3}
+
+    def failing() -> list[Level[_QueueAttributes]]:
+        msg = "the queue is gone"
+        raise OSError(msg)
+
+    _DEPTH.observe(lambda: [(held["a"], _QueueAttributes(queue="a"))])
+    _DEPTH.observe(failing)
+    _DEPTH._reads.append((os.getppid(), lambda: [(99.0, _QueueAttributes(queue="parent"))]))
+    METRICS.get()  # this process's meter: the gauge is made with it
+
+    first = _scrape()
+    held["a"] = 1
+    second = _scrape()
+
+    assert 'test_queue="a"} 3.0' in first
+    assert 'test_queue="a"} 1.0' in second
+    assert "parent" not in first
 
 
 class _Clock:

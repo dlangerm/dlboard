@@ -18,7 +18,7 @@ from prometheus_client.parser import text_string_to_metric_families
 from pydantic import BaseModel
 
 import dlboard.plugins
-from dlboard.serve.telemetry import INSTRUMENTS, Counter, Histogram, _Instrument
+from dlboard.serve.telemetry import INSTRUMENTS, Counter, Histogram, ObservedGauge, _Instrument
 from dlboard.serve.telemetry._prometheus import serve_metrics
 
 _DOCS = Path(__file__).parents[4] / "docs"
@@ -81,13 +81,19 @@ def served(telemetry: pytest.MonkeyPatch, tmp_path: Path) -> dict[str, set[str]]
     telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
     telemetry.setenv("DLBOARD_TELEMETRY_PROMETHEUS_DIR", str(tmp_path))
     found: dict[str, set[str]] = {}
+    instruments = _defined_instruments()
+    for gauge in instruments.values():
+        if isinstance(gauge, ObservedGauge):  # what earlier tests' stores had it read is not this test's
+            telemetry.setattr(gauge, "_reads", [])
     seen = _series()
-    for name, instrument in _defined_instruments().items():
+    for name, instrument in instruments.items():
         match instrument:
             case Histogram():
                 instrument.record(1)
             case Counter():
                 instrument.add(1)
+            case ObservedGauge():
+                instrument.observe(lambda: [(1.0, None)])
         found[name] = (now := _series()) - seen
         seen = now
     return found

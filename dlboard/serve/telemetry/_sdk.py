@@ -22,6 +22,7 @@ from opentelemetry._logs import SeverityNumber
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
+from opentelemetry.metrics import CallbackOptions, Observation
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import Histogram, MeterProvider
@@ -34,11 +35,12 @@ from dlboard._version import __version__
 from dlboard.serve.telemetry import LOGS, SECONDS_BUCKETS, MetricsExporter, TelemetrySettings, Unit
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
     from opentelemetry._logs import Logger
     from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as GrpcLogExporter
-    from opentelemetry.metrics import Meter
+    from opentelemetry.metrics import Meter, ObservableGauge
+    from opentelemetry.util.types import Attributes as OtelAttributes
     from opentelemetry.util.types import AttributeValue
     from structlog.typing import EventDict, WrappedLogger
 
@@ -131,6 +133,21 @@ def build_metrics(settings: TelemetrySettings) -> Metrics:
 
         snapshots = Snapshots(settings.prometheus_dir, settings.prometheus_snapshot_s)
     return Metrics(provider.get_meter(_SERVICE_NAME, __version__), provider, snapshots)
+
+
+def observable_gauge(
+    meter: Meter,
+    name: str,
+    unit: str,
+    description: str,
+    levels: Callable[[], Iterable[tuple[float, OtelAttributes]]],
+) -> ObservableGauge:
+    """A gauge on `meter` whose values `levels` says each time its readers collect (`ObservedGauge`)."""
+
+    def observe(_options: CallbackOptions) -> Iterable[Observation]:
+        return [Observation(value, attributes) for value, attributes in levels()]
+
+    return meter.create_observable_gauge(name, callbacks=[observe], unit=unit, description=description)
 
 
 def build_logs(_settings: TelemetrySettings) -> Logs:

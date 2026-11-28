@@ -19,6 +19,7 @@ import math
 import queue
 import signal
 import time
+import weakref
 from dataclasses import dataclass
 from enum import Enum, StrEnum, auto
 from multiprocessing import parent_process, util
@@ -44,6 +45,7 @@ from dlboard.serve.telemetry import (
     Counter,
     Histogram,
     NoAttributes,
+    ObservedGauge,
     Outcome,
     OutcomeAttributes,
     Unit,
@@ -62,6 +64,7 @@ if TYPE_CHECKING:
     from dlboard._telemetry.traces import ActiveSpan, Carrier
     from dlboard.models import DataStore
     from dlboard.models._artifact import Artifact, NewArtifact
+    from dlboard.serve.telemetry import Level
 
 
 _log = get_logger(__name__)
@@ -163,6 +166,33 @@ _INGESTS = Histogram[OutcomeAttributes](
     "dlboard.artifact.ingest.duration",
     Unit.SECONDS,
     "How long recording one batch of written artifacts' refs took.",
+)
+
+
+class _Stage(StrEnum):
+    """Where on its way to being stored an upload waits: which part of the pipeline is behind when uploads back up."""
+
+    WRITE = "write"
+    """Staged, waiting for the blob writer to take it: the object store (or disk) is behind."""
+    RETRY = "retry"
+    """A write that failed, waiting to be tried again: the object store is refusing writes."""
+    INGEST = "ingest"
+    """Written, waiting for the batch that records its ref: the database is behind."""
+
+
+class _StageLabel(StrEnum):
+    STAGE = "dlboard.artifact.stage"
+
+
+@dataclass(frozen=True, slots=True)
+class _StageAttributes(Attributes):
+    stage: _Stage = attribute(_StageLabel.STAGE)
+
+
+_QUEUED = ObservedGauge[_StageAttributes](
+    "dlboard.artifact.queue.depth",
+    Unit.UPLOADS,
+    "Uploads waiting at each stage of their way to being stored: to be written, to be tried again, to be recorded.",
 )
 
 _ENQUEUE_TIMEOUT_SEC: Final = 30
@@ -306,6 +336,7 @@ def _write_blobs(
     parent = parent_process()
     # A failed write waits its turn here, by when it is due, so that one the backend keeps refusing holds up no other.
     retries: list[tuple[float, int, int, _Upload]] = []  # (due, tiebreak, attempts, upload)
+    _QUEUED.observe(lambda: [(len(retries), _StageAttributes(stage=_Stage.RETRY))])
     tiebreak = itertools.count()
     while True:
         due: list[tuple[int, _Upload]] = []
@@ -402,6 +433,12 @@ def _recorded_refs(store: DataStore[...], artifacts: list[Artifact]) -> set[str]
     }
 
 
+def _queue_depths_of(store: weakref.ref[BlobArtifactStore]) -> list[Level[_StageAttributes]]:
+    """`store`'s queue depths (`BlobArtifactStore.queue_depths`); none once it is gone."""
+    alive = store()
+    return [] if alive is None else alive.queue_depths()
+
+
 class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
     """
     An `ArtifactStore` for any `BlobBackend` -- staging, batched writes, and ref-ingest are shared.
@@ -440,6 +477,8 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
         """What the ingest loop reads: the latest writer's results, still after the store is closed, so it can drain them."""
         if self._writer is not None:
             Thread(target=self._tend, daemon=True, name="artifact-writer-tender").start()
+            # Held weakly: the gauge outlives a store (a test makes many), and must not keep one, with its writer, alive.
+            _QUEUED.observe(functools.partial(_queue_depths_of, weakref.ref(self)))
         # Not `atexit`: a Granian worker is a `multiprocessing` child, which exits through
         # `util._exit_function` (running only these finalizers) and never reaches `atexit` handlers.
         # Priority >= 0 also runs it before multiprocessing terminates its daemonic children (our writer).
@@ -481,6 +520,16 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
             except Exception:  # noqa: BLE001 -- the tender must outlive whatever it tends
                 _log.exception("Tending the blob writer failed; trying again")
             self._stopping.wait(_TEND_SEC)
+
+    def queue_depths(self) -> list[Level[_StageAttributes]]:
+        """How many uploads this process's writer has yet to take, and has written but not had recorded."""
+        writer, results = self._writer, self._results
+        if writer is None or results is None:
+            return []  # closed: nothing waits here any more
+        return [
+            (writer.queue.qsize(), _StageAttributes(stage=_Stage.WRITE)),
+            (results.writer.results.qsize(), _StageAttributes(stage=_Stage.INGEST)),
+        ]
 
     def _restart(self, dead: _Writer) -> _Writer:
         """Start a writer in place of `dead`, on queues of its own, and give it every upload this process holds."""
