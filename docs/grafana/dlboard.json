@@ -819,6 +819,77 @@
       ],
       "title": "Runs deleted and refused by retention",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 83
+      },
+      "id": 29,
+      "panels": [],
+      "title": "Database",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Postgres connections in use and idle, every worker's pool added up. Each worker may open DLBOARD_POSTGRES_POOL_SIZE plus DLBOARD_POSTGRES_MAX_OVERFLOW (5 + 10 by default): in use approaching that times the number of workers, requests start waiting for one. Pushed over OTLP, each worker is a series of its own.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 84
+      },
+      "id": 30,
+      "targets": [
+        {
+          "expr": "sum by (dlboard_db_pool_state) (dlboard_db_pool_connections{job=~\"$job\", deployment_environment=~\"$environment\"})",
+          "legendFormat": "{{dlboard_db_pool_state}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Database connections",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Requests turned away with a 503 after waiting DLBOARD_POSTGRES_POOL_TIMEOUT_S for a connection: the pool is too small for the load, or the database too slow to give connections back.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 84
+      },
+      "id": 31,
+      "targets": [
+        {
+          "expr": "sum(rate(dlboard_db_pool_timeouts_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
+          "legendFormat": "timed out",
+          "refId": "A"
+        }
+      ],
+      "title": "Requests that waited out the pool",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

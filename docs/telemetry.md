@@ -124,6 +124,8 @@ The names and attributes are covered by the [compatibility promise](compatibilit
 | `dlboard.runs.created` | counter | | Runs started. |
 | `dlboard.runs.finished` | counter | `dlboard.run.status` | Runs reported done, by how they ended. |
 | `dlboard.auth.sign_ins` | counter | `dlboard.auth.outcome` (`success`, `wrong_credentials`, `throttled`, `disabled`) | Attempts at the password sign-in form. |
+| `dlboard.db.pool.connections` | gauge | `dlboard.db.pool.state` (`in_use`, `idle`) | Each process's pooled Postgres connections (`POSTGRES_STORAGE`). A worker opens at most `DLBOARD_POSTGRES_POOL_SIZE` plus `DLBOARD_POSTGRES_MAX_OVERFLOW`; in use near that, requests wait for one. Size the pool so every worker's together stays under the server's `max_connections`. |
+| `dlboard.db.pool.timeouts` | counter | | Requests that waited `DLBOARD_POSTGRES_POOL_TIMEOUT_S` for a connection and were answered 503 (a client retries one): the pool is too small for the load, or the database too slow to give connections back. |
 | `dlboard.server.workers` | up/down counter | | Server worker processes that started and are serving. One series per process, so it stops arriving when the server is down. |
 | `dlboard.task.runs` | counter | `dlboard.task`, `dlboard.outcome` (`success`, `failure`, `hung`) | Runs of each background task, by how they ended. Emitted by the custodian process. |
 | `dlboard.task.duration` | histogram, s | `dlboard.task` | How long one run of a background task took. |
