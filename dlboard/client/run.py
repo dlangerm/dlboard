@@ -26,7 +26,6 @@ import time
 import weakref
 from argparse import Namespace
 from dataclasses import dataclass, field
-from http import HTTPStatus
 from pathlib import Path
 from queue import Full
 from typing import TYPE_CHECKING, Any, Final, Generic, Protocol, TypeVar
@@ -39,7 +38,7 @@ from pydantic_core import to_jsonable_python
 from pydantic_settings import BaseSettings
 
 from dlboard import models
-from dlboard._batching import BatchParams, Failure, ship_batches
+from dlboard._batching import BatchParams, ship_batches
 from dlboard._compat import StrEnum
 from dlboard._logging import configure_client_logging
 from dlboard._mp_context import SPAWN_CONTEXT
@@ -51,7 +50,7 @@ from dlboard.client._console import ConsoleCapture, ConsoleChunk, ConsoleSetting
 from dlboard.client._context import ContextSettings
 from dlboard.client._heartbeat import Heartbeat
 from dlboard.client._offline import connect
-from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
+from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI, classify_failure
 from dlboard.client._warnings import warn
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.histograms import DEFAULT_BINNING
@@ -91,16 +90,6 @@ _KEYS_PER_QUEUED_METRICS: Final = 1000
 How many keys one queued `LoggedMetrics` carries. A wider call is queued as several, so a batch of
 `metrics_q_flush_size` items stays a bounded upload however many keys each step logged.
 """
-_TRANSIENT_CLIENT_ERRORS: Final = frozenset({HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS})
-_ITEM_CLIENT_ERRORS: Final = frozenset(
-    {
-        HTTPStatus.BAD_REQUEST,
-        HTTPStatus.CONFLICT,
-        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
-        HTTPStatus.UNPROCESSABLE_ENTITY,
-    }
-)
-"""The 4xx a server answers about what a batch holds, so a batch without the offending item can still land."""
 
 
 def _split_keys(metrics: Mapping[str, float]) -> list[dict[str, float]]:
@@ -122,28 +111,6 @@ def warn_if_startup_was_slow(elapsed_sec: float) -> None:
             "dlboard -- any backpressure warnings logged in the next few steps are a side effect of "
             "this startup delay rather than an ongoing throughput problem."
         )
-
-
-def classify_failure(exc: Exception) -> Failure:
-    """
-    What a failure to ship a batch says about it (see `Failure`).
-
-    Transient: the server or network is down or busy -- a connection error, a timeout, a 5xx, or a 408/429, which
-    only ask to retry later. Per item: something in the batch can never be sent, so the batch is split to find it --
-    a 4xx about what was sent (an invalid item, a duplicate, a batch grown past `DLBOARD_MAX_UPLOAD_MB` while the
-    server was down), or an error here, such as a `File` whose path is gone. Whole: a 4xx that refuses the request
-    itself, whatever is in it -- credentials, access, a run that is gone, a locked project -- so no part of it lands.
-    """
-    match exc:
-        case requests.ConnectionError() | requests.Timeout():
-            return Failure.TRANSIENT
-        case requests.HTTPError(response=requests.Response() as response):
-            status = response.status_code
-            if status >= HTTPStatus.INTERNAL_SERVER_ERROR or status in _TRANSIENT_CLIENT_ERRORS:
-                return Failure.TRANSIENT
-            return Failure.PER_ITEM if status in _ITEM_CLIENT_ERRORS else Failure.WHOLE
-        case _:
-            return Failure.PER_ITEM
 
 
 def _ship_artifacts(api: RunAPI, experiment_id: int, run_id: int, batch: list[Sequence[AnyArtifact]]) -> None:

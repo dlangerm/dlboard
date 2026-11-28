@@ -19,10 +19,9 @@ from pytorch_lightning.demos.boring_classes import BoringModel
 from dlboard._batching import Failure
 from dlboard._wire import Resource, RunCall, create_path, run_path
 from dlboard.client import run
-from dlboard.client._rest_api import BasicDlboardAPI
+from dlboard.client._rest_api import BasicDlboardAPI, classify_failure
 from dlboard.client.artifacts import image
 from dlboard.client.dlboard_logger import DLBoardLogger
-from dlboard.client.run import classify_failure
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dlboard.models import (
     FILE_KIND_TAG,

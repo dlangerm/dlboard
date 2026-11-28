@@ -24,7 +24,7 @@ import pendulum
 from pydantic import BaseModel, Field
 
 from dlboard import models
-from dlboard.client import _tfevents
+from dlboard.client import _resumable, _tfevents
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -89,7 +89,10 @@ def import_logdir(
     """
     Bring what is new in `logdir` into `project` (the experiment named `experiment`, or after the logdir), and say what.
 
-    Safe to run again, and again while its runs are still writing: each pass reads only what the last one did not.
+    Safe to run again, and again while its runs are still writing: each pass reads only what the last one did not. The
+    state is saved as soon as a run is made on the server and after each batch is sent (`_resumable`), so an import
+    stopped anywhere makes no run twice and sends no batch twice; what the server refuses for good is skipped, warned
+    about, and anything else stops the import, which the next one picks up from.
     """
     state_path = state_path or logdir / STATE_FILE
     states = _StateFile.model_validate_json(state_path.read_text()) if state_path.exists() else _StateFile()
@@ -99,6 +102,7 @@ def import_logdir(
         project_id = api.get_or_create_project(project).id
         found = api.get_or_create_experiment(project_id, name, source=models.ExperimentSource.TENSORBOARD)
         states.imports[key] = _ImportState(experiment_id=found.id)
+        _resumable.save(states, state_path)
     imported = states.imports[key]
     report = ImportReport()
     with tempfile.TemporaryDirectory() as scratch:
@@ -106,13 +110,15 @@ def import_logdir(
             if run_dir not in imported.runs:
                 created = api.create_run(models.NewRun(experiment_id=imported.experiment_id, name=run_dir))
                 imported.runs[run_dir] = _RunState(run_id=created.id)
+                _resumable.save(states, state_path)
             run = _Importing(
                 api, imported.experiment_id, imported.runs[run_dir].run_id, Path(scratch), report
             )
+            read = imported.runs[run_dir].read
             for file in files:
-                read = imported.runs[run_dir].read
-                read[file.name] = run.read(file, read.get(file.name, 0))
-                state_path.write_text(states.model_dump_json(indent=2))
+                for sent_to in run.read(file, read.get(file.name, 0)):
+                    read[file.name] = sent_to
+                    _resumable.save(states, state_path)
             run.finish()
     return report
 
@@ -149,19 +155,25 @@ class _Importing:
         self._images: list[tuple[models.NewArtifact, Path]] = []
         self._last: float | None = None
 
-    def read(self, file: Path, offset: int) -> int:
-        """Send what `file` holds past `offset`, and how far that is: the next import starts there."""
+    def read(self, file: Path, offset: int) -> Iterator[int]:
+        """
+        Send what `file` holds past `offset`, a batch at a time; after each, how far the file is sent: where to go on from.
+
+        A record that can't be read (cut short, it would not be read at all) is skipped, with a warning naming where.
+        """
         for end, record in _tfevents.records(file, offset):
-            event = _tfevents.event(record)
-            for summary in event.summaries:
-                self._take(event, summary)
-            if event.summaries:
-                self._last = event.wall_time
+            with _resumable.skipped_if_refused(f"the record at byte {offset} of {file}"):
+                event = _tfevents.event(record)
+                for summary in event.summaries:
+                    self._take(event, summary)
+                if event.summaries:
+                    self._last = event.wall_time
             offset = end
             if len(self._steps) >= _BATCH or len(self._images) >= _BATCH:
                 self._send()
+                yield offset
         self._send()
-        return offset
+        yield offset
 
     def finish(self) -> None:
         """Say the run ended when it last wrote, if this pass found anything: a run that writes again is finished again."""
@@ -204,23 +216,26 @@ class _Importing:
         return self._steps.setdefault(event.step, _Step(event.wall_time))
 
     def _send(self) -> None:
+        """Send what is gathered: a batch of metrics, and one of images; one the server refuses for good is skipped."""
         if self._steps:
-            self._api.log_metric_batch(
-                [
-                    models.LoggedMetrics(
-                        step=step,
-                        metrics=at.metrics,
-                        histograms=at.histograms,
-                        experiment_id=self._experiment_id,
-                        run_id=self._run_id,
-                        timestamp_utc=pendulum.from_timestamp(at.wall_time, tz="UTC"),
-                    )
-                    for step, at in self._steps.items()
-                ]
-            )
+            with _resumable.skipped_if_refused(f"{len(self._steps)} steps' metrics"):
+                self._api.log_metric_batch(
+                    [
+                        models.LoggedMetrics(
+                            step=step,
+                            metrics=at.metrics,
+                            histograms=at.histograms,
+                            experiment_id=self._experiment_id,
+                            run_id=self._run_id,
+                            timestamp_utc=pendulum.from_timestamp(at.wall_time, tz="UTC"),
+                        )
+                        for step, at in self._steps.items()
+                    ]
+                )
             self._steps = {}
         if self._images:
-            self._api.log_artifact_batch(self._images)
+            with _resumable.skipped_if_refused(f"{len(self._images)} images"):
+                self._api.log_artifact_batch(self._images)
             for _, path in self._images:
                 with contextlib.suppress(FileNotFoundError):
                     path.unlink()

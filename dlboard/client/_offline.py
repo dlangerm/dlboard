@@ -32,6 +32,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from dlboard import models
 from dlboard._identity import resolve_username
 from dlboard._wire import API_VERSION, FinishRun, GetOrCreateProject, Identity, MarkRun
+from dlboard.client import _resumable
 from dlboard.client._rest_api import BasicDlboardAPI
 
 if TYPE_CHECKING:
@@ -257,7 +258,13 @@ class SyncReport:
 
 
 def sync(api: BasicDlboardAPI, folder: Path, *, state_path: Path | None = None) -> SyncReport:
-    """Send what is new in `folder` (runs `OfflineAPI` logged there) to the server, and say how much."""
+    """
+    Send what is new in `folder` (runs `OfflineAPI` logged there) to the server, and say how much.
+
+    The state is saved as soon as a run is made on the server, and after each call is replayed (`_resumable`): a sync
+    stopped anywhere makes no run twice, and sends again at most the one call it was making. A call the server refuses
+    for good is skipped, with a warning; anything else stops the sync, which the next one picks up from.
+    """
     state_path = state_path or folder / STATE_FILE
     states = _StateFile.model_validate_json(state_path.read_text()) if state_path.exists() else _StateFile()
     synced = states.servers.setdefault(api.base_url, _ServerSync())
@@ -265,18 +272,21 @@ def sync(api: BasicDlboardAPI, folder: Path, *, state_path: Path | None = None) 
     for run_folder in sorted(folder.glob(f"{_RUN_PREFIX}*")):
         if not (run_folder / START_FILE).exists():
             continue  # a run still being started: its folder is there, its start not yet
-        run = synced.runs.get(run_folder.name) or _create(api, synced, run_folder)
-        synced.runs[run_folder.name] = run
+        if (run := synced.runs.get(run_folder.name)) is None:
+            run = synced.runs[run_folder.name] = _create(api, synced, run_folder)
+            _resumable.save(states, state_path)
         before = report.calls
         for segment in sorted(run_folder.glob("*.jsonl")):
             offset = run.read.get(segment.name, 0)
             for end, line in _lines(segment, offset):
-                _replay(api, run, run_folder, _RECORD.validate_json(line))
+                with _resumable.skipped_if_refused(
+                    f"a call of {run_folder.name} ({segment.name}, byte {offset})"
+                ):
+                    _replay(api, run, run_folder, _RECORD.validate_json(line))
                 report.calls += 1
-                run.read[segment.name] = end
-                state_path.write_text(states.model_dump_json(indent=2))
+                run.read[segment.name] = offset = end
+                _resumable.save(states, state_path)
         report.runs += report.calls > before
-        state_path.write_text(states.model_dump_json(indent=2))
     return report
 
 
