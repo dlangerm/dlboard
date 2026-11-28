@@ -944,6 +944,8 @@
   "dlboard/plugins/themes/tests/inter_test.py::test_the_default_theme_serves_the_inter_it_asks_for": 0.01463352000064333,
   "dlboard/plugins/webhooks/tests/hooks_test.py::test_a_post_over_https_goes_to_the_checked_address_and_checks_the_certificate_against_the_urls_host[localhost-True]": 0.03363556700014669,
   "dlboard/plugins/webhooks/tests/hooks_test.py::test_a_post_over_https_goes_to_the_checked_address_and_checks_the_certificate_against_the_urls_host[other.example-False]": 0.03365170299980491,
+  "dlboard/plugins/webhooks/tests/hooks_test.py::test_a_receiver_that_trickles_its_answer_holds_a_post_no_longer_than_its_deadline[body-never-ends]": 0.019558783009415492,
+  "dlboard/plugins/webhooks/tests/hooks_test.py::test_a_receiver_that_trickles_its_answer_holds_a_post_no_longer_than_its_deadline[headers-never-end]": 1.006386463996023,
   "dlboard/plugins/webhooks/tests/hooks_test.py::test_a_signature_reads_back_as_the_header_says_it": 0.09062534700001379,
   "dlboard/plugins/webhooks/tests/hooks_test.py::test_a_webhook_may_not_post_to_an_address_that_isnt_public[http://10.1.2.3/]": 0.0010732040000220877,
   "dlboard/plugins/webhooks/tests/hooks_test.py::test_a_webhook_may_not_post_to_an_address_that_isnt_public[http://100.64.0.1/]": 0.0010256100001697632,

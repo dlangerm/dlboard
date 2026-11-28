@@ -85,7 +85,7 @@ Posting each run that ends to its project's webhooks: see [webhooks.md](webhooks
 | `DLBOARD_WEBHOOK_ALLOWED_HOSTS` | none | Comma-separated hosts a webhook may post to though they resolve to an address that isn't public (this machine, a private network, a tailnet): an internal chat server, say. |
 | `DLBOARD_WEBHOOK_PUBLIC_URL` | none | Where people reach the server (`https://dlboard.example.com`), for the links in what a webhook posts; unset, each webhook's links use the address its owner reached the server at. |
 | `DLBOARD_WEBHOOK_MAX_PER_PROJECT` | `10` | The most webhooks a project has. |
-| `DLBOARD_WEBHOOK_TIMEOUT_S` | `5` | How long a post waits to connect, and then for the answer. |
+| `DLBOARD_WEBHOOK_TIMEOUT_S` | `5` | How long a post waits to connect, and then for the answer: a post not answered within twice this is tried again later, however its receiver trickles the answer. Only the status is read. |
 | `DLBOARD_WEBHOOK_ATTEMPTS` | `10` | Tries a post gets before its webhook is turned off, spaced by the custodian's retry backoff (`DLBOARD_CUSTODIAN_RETRY_FIRST_S`, doubling): with the defaults, about eight and a half hours. |
 | `DLBOARD_WEBHOOK_INTERVAL_S` | `30` | How often the server looks for runs that ended. |
 | `DLBOARD_WEBHOOK_EXPIRE_H` | `48` | How long after a run ends its end may still be posted: one not posted by then (the server was down, or the plugin was taken off the list and is listed again) is dropped. Must be longer than `DLBOARD_WEBHOOK_ATTEMPTS` tries take, or the server doesn't start. |

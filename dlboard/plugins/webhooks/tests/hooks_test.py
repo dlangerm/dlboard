@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import shutil
+import socket
 import subprocess
 import threading
+import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +36,7 @@ from dlboard.plugins.webhooks._tab import checked
 from dlboard.serve import SettingWrite
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
     from wsgiref.types import StartResponse, WSGIEnvironment
 
@@ -144,6 +148,80 @@ def test_a_signature_reads_back_as_the_header_says_it(secret: str, body: bytes, 
     assert Signature.parse(signed.header) == signed
 
 
+def _payload() -> WebhookPayload:
+    return WebhookPayload(
+        event=WebhookEvent.FINISHED,
+        text="r finished",
+        project=Named(id=1, name="p"),
+        experiment=Named(id=1, name=None),
+        run=RunSummary(
+            id=1,
+            name=None,
+            status=None,
+            created_at=pendulum.now("UTC"),
+            ended_at=None,
+            done_at=pendulum.now("UTC"),
+            duration_s=None,
+        ),
+        url=HttpUrl("https://d/experiment/1?run=1"),
+    )
+
+
+@contextlib.contextmanager
+def _trickling(answer: bytes) -> Generator[int]:
+    """A receiver on a port of its own that answers `answer`, then a byte at a time, each well within any timeout."""
+    stop = threading.Event()
+    listener = socket.create_server(("127.0.0.1", 0))
+
+    def serve() -> None:
+        connection, _ = listener.accept()
+        with connection:
+            connection.recv(65536)
+            connection.sendall(answer)
+            while not stop.wait(0.05):
+                with contextlib.suppress(OSError):
+                    connection.sendall(b"x")
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        yield listener.getsockname()[1]
+    finally:
+        stop.set()
+        listener.close()
+
+
+@pytest.mark.parametrize(
+    ("answer", "lands"),
+    [
+        pytest.param(b"HTTP/1.1 200 OK\r\nX-Slow: ", False, id="headers-never-end"),
+        pytest.param(
+            b"HTTP/1.1 204 No Content\r\nContent-Length: 1000000000\r\n\r\n", True, id="body-never-ends"
+        ),
+    ],
+)
+def test_a_receiver_that_trickles_its_answer_holds_a_post_no_longer_than_its_deadline(
+    monkeypatch: pytest.MonkeyPatch, answer: bytes, lands: bool
+) -> None:
+    """Each read is within the timeout, which alone bounded a post: a receiver could hold every delivery forever."""
+    monkeypatch.setenv("DLBOARD_WEBHOOK_ALLOWED_HOSTS", "127.0.0.1")
+    monkeypatch.setenv("DLBOARD_WEBHOOK_TIMEOUT_S", "0.5")
+    with _trickling(answer) as port:
+        hook = Webhook(
+            url=HttpUrl(f"http://127.0.0.1:{port}/hook"),
+            events=frozenset(WebhookEvent),
+            link_base=HttpUrl("https://d/"),
+            created_by=1,
+        )
+        started = time.monotonic()
+        if lands:
+            send(hook, _payload(), uuid.uuid4())  # the status is all it reads
+        else:
+            with pytest.raises(RefusedError, match="didn't answer within 1s") as refused:
+                send(hook, _payload(), uuid.uuid4())
+            assert refused.value.failure is Failure.RETRY
+        assert time.monotonic() - started < 3
+
+
 def _answer(_environ: WSGIEnvironment, start_response: StartResponse) -> list[bytes]:
     start_response("204 No Content", [])
     return []
@@ -175,22 +253,7 @@ def test_a_post_over_https_goes_to_the_checked_address_and_checks_the_certificat
         link_base=HttpUrl("https://d/"),
         created_by=1,
     )
-    payload = WebhookPayload(
-        event=WebhookEvent.FINISHED,
-        text="r finished",
-        project=Named(id=1, name="p"),
-        experiment=Named(id=1, name=None),
-        run=RunSummary(
-            id=1,
-            name=None,
-            status=None,
-            created_at=pendulum.now("UTC"),
-            ended_at=None,
-            done_at=pendulum.now("UTC"),
-            duration_s=None,
-        ),
-        url=HttpUrl("https://d/experiment/1?run=1"),
-    )
+    payload = _payload()
     try:
         if lands:
             send(hook, payload, uuid.uuid4())
