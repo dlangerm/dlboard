@@ -113,7 +113,8 @@ class _Nvml:
                 for index, handle in enumerate(self.handles):
                     try:
                         values.append((read(handle), {"hw.id": f"gpu{index}"}))
-                    except pynvml.NVMLError:  # a reading this GPU doesn't support: left out, not zero
+                    # A reading this GPU doesn't support (or a total it reports as zero): left out, not zero.
+                    except (pynvml.NVMLError, ZeroDivisionError):
                         continue
                 return values
 
@@ -235,12 +236,10 @@ class SystemSampler:
     def _sample_until_stopped(self) -> None:
         while not self._stopped.wait(self._interval_s):
             try:
-                values = self.sample()
-            except Exception:  # noqa: BLE001 -- a sample that fails (a driver error) must never end training
+                if values := self.sample():
+                    self._log(values)
+            except Exception:  # noqa: BLE001 -- a failed sample (a driver error), or log, must not end the sampling
                 _log.warning("A system metrics sample failed; the next one is tried as usual", exc_info=True)
-                continue
-            if values:
-                self._log(values)
 
     def stop(self) -> None:
         """Stop sampling, then let go of the provider and NVML: once, however often it is asked (a run's finish, then its exit)."""

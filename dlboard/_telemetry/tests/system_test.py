@@ -189,6 +189,37 @@ def test_the_sampler_logs_every_interval_until_it_is_stopped(caplog: pytest.LogC
     assert caplog.records == []
 
 
+def test_a_gpu_that_reports_no_memory_total_leaves_its_share_out(nvml: _FakeNvml) -> None:
+    nvml.gpus = [_Gpu("GPU-z", utilization=10, used=0, total=0)]
+
+    sampled = _sampled(cpu=False, gpu=True)
+
+    assert "system/hw.gpu.memory.utilization/gpu0" not in sampled
+    assert sampled["system/hw.gpu.utilization/gpu0"] == pytest.approx(0.1)
+
+
+def test_a_sample_the_run_could_not_take_does_not_end_the_sampling() -> None:
+    """`log` is the run's: whatever it raises is warned about, and the next sample is taken as usual."""
+    calls = 0
+    again = threading.Event()
+
+    def log(values: Mapping[str, float]) -> None:
+        nonlocal calls
+        del values
+        calls += 1
+        if calls == 1:
+            msg = "the run could not take it"
+            raise RuntimeError(msg)
+        again.set()
+
+    sampler = SystemSampler.start(0.05, log, cpu=True, gpu=False)
+    assert sampler is not None
+    try:
+        assert again.wait(10)
+    finally:
+        sampler.stop()
+
+
 @pytest.mark.parametrize(
     ("settings", "installed", "samples"),
     [
