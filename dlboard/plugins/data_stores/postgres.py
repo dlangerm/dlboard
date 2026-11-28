@@ -12,22 +12,37 @@ PgBouncer in front, and see `prepare_threshold`).
 
 from __future__ import annotations
 
+import functools
 import json
+import weakref
+from dataclasses import dataclass
+from enum import StrEnum
+from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, cast, override
 
 import sqlalchemy as sa
+from flask import Response, jsonify
 from pydantic import BeforeValidator, NonNegativeInt, PositiveFloat, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+from sqlalchemy.pool import QueuePool
+from structlog.stdlib import get_logger
 
+from dlboard._telemetry import Attributes, attribute
 from dlboard.serve import Dependency, SQLStoreBase, set_data_store, wait_for
+from dlboard.serve.telemetry import Counter, NoAttributes, ObservedGauge, Unit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from dash import Dash
+
+    from dlboard.serve.telemetry import Level
+
+_log = get_logger(__name__)
 
 
 _SCHEMA_LOCK_KEY: Final = int.from_bytes(b"dlboard")
@@ -164,6 +179,61 @@ def _bind_for_copy(column_type: sa.types.TypeEngine[Any], dialect: sa.Dialect) -
     return column_type.bind_processor(dialect)
 
 
+class _PoolState(StrEnum):
+    IN_USE = "in_use"
+    """Checked out by a request or a task: past `pool_size`, the rest are overflow, closed again once given back."""
+    IDLE = "idle"
+    """Open, in the pool, waiting for the next to need one."""
+
+
+class _PoolLabel(StrEnum):
+    STATE = "dlboard.db.pool.state"
+
+
+@dataclass(frozen=True, slots=True)
+class _PoolAttributes(Attributes):
+    state: _PoolState = attribute(_PoolLabel.STATE)
+
+
+_CONNECTIONS = ObservedGauge[_PoolAttributes](
+    "dlboard.db.pool.connections",
+    Unit.CONNECTIONS,
+    "Each process's pooled Postgres connections, in use and idle.",
+)
+_POOL_TIMEOUTS = Counter[NoAttributes](
+    "dlboard.db.pool.timeouts",
+    Unit.REQUESTS,
+    "Requests turned away with a 503 for waiting DLBOARD_POSTGRES_POOL_TIMEOUT_S for a database connection.",
+)
+
+
+def _pool_levels(engine: weakref.ref[sa.Engine]) -> list[Level[_PoolAttributes]]:
+    """How many of `engine`'s pooled connections are in use and idle now; none once it is gone."""
+    match engine():
+        case sa.Engine(pool=QueuePool() as pool):
+            return [
+                (pool.checkedout(), _PoolAttributes(state=_PoolState.IN_USE)),
+                (pool.checkedin(), _PoolAttributes(state=_PoolState.IDLE)),
+            ]
+        case _:
+            return []
+
+
+def _pool_exhausted(exhausted: PoolTimeoutError) -> tuple[Response, int, dict[str, str]]:
+    """
+    A request that waited out `pool_timeout_s` for a connection: a 503 to try again soon, not a 500, and counted.
+
+    Every connection this worker may open was busy that long: the pool is too small for the load (see the module).
+    """
+    _POOL_TIMEOUTS.add(1)
+    _log.warning("A request waited too long for a database connection", error=str(exhausted))
+    return (
+        jsonify(error="The database is busy: try again shortly"),
+        HTTPStatus.SERVICE_UNAVAILABLE,
+        {"Retry-After": "5"},
+    )
+
+
 class PostgresStore(SQLStoreBase[PostgresSettings]):
     """Use a Postgres database as the data store."""
 
@@ -184,6 +254,8 @@ class PostgresStore(SQLStoreBase[PostgresSettings]):
         # The database may still be coming up (a host that has just rebooted): see `wait_for`.
         wait_for(Dependency.DATABASE, lambda: engine.connect().close(), transient=_unreachable)
         super().__init__(engine, schema=settings.db_schema)
+        # Held weakly: the gauge outlives a store (a test makes many), and must not keep one's pool open.
+        _CONNECTIONS.observe(functools.partial(_pool_levels, weakref.ref(engine)))
 
     @override
     def _insert_ignoring_conflicts(self, table: sa.Table) -> sa.Insert:
@@ -233,5 +305,6 @@ class PostgresStore(SQLStoreBase[PostgresSettings]):
 
 
 def plug(app: Dash) -> None:
-    """Plugin content."""
+    """Connect the data store, and answer a request that waited out the pool for a connection (`_pool_exhausted`)."""
     set_data_store(app, PostgresStore.get_or_create(PostgresSettings()))
+    app.server.register_error_handler(PoolTimeoutError, _pool_exhausted)
