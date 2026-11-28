@@ -20,7 +20,7 @@ from werkzeug.serving import make_server
 from werkzeug.wrappers import Request
 
 from dlboard import models
-from dlboard.conftest import Clock, dispose_stores, run_task
+from dlboard.conftest import Clock, dispose_stores, run_task, scraped_total
 from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dlboard.plugins import webhooks as webhooks_plugin
 from dlboard.plugins.data_stores import filesystem, sqlite
@@ -36,10 +36,11 @@ from dlboard.plugins.webhooks._hooks import (
     WebhookPayload,
     WebhookSettings,
 )
-from dlboard.plugins.webhooks._tasks import WebhookTask, WebhookWork
+from dlboard.plugins.webhooks._tasks import WEBHOOKS_PRINCIPAL, DeliveryOutcome, WebhookTask, WebhookWork
 from dlboard.serve import SQLStoreBase, get_system_data_store
 from dlboard.serve import app as build_app
 from dlboard.serve._custodian import get_system_task_store
+from dlboard.serve.telemetry._prometheus import serve_metrics
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterator
@@ -272,6 +273,48 @@ def test_a_run_that_ended_before_its_webhook_was_made_is_not_posted(
     _announce(app)
 
     assert receiver.received == []
+
+
+@pytest.mark.usefixtures("one_attempt")
+@pytest.mark.parametrize(
+    ("status", "outcome"),
+    [
+        (204, DeliveryOutcome.DELIVERED),
+        (500, DeliveryOutcome.TURNED_OFF),
+        (410, DeliveryOutcome.TURNED_OFF),
+        (400, DeliveryOutcome.REJECTED),
+        (None, DeliveryOutcome.UNWANTED),
+    ],
+    ids=["delivered", "failing-for-good", "gone", "refused", "webhook-deleted-meanwhile"],
+)
+def test_each_delivery_is_counted_by_what_became_of_it(  # noqa: PLR0913 -- the app, its store, the receiver, the case
+    app: Dash,
+    store: SQLStoreBase[Any],
+    receiver: _Receiver,
+    telemetry: pytest.MonkeyPatch,
+    tmp_path: Path,
+    status: int | None,
+    outcome: DeliveryOutcome,
+) -> None:
+    """#820: an operator sees what webhooks do from the dashboard, not the custodian's log alone."""
+    telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
+    telemetry.setenv("DLBOARD_TELEMETRY_PROMETHEUS_DIR", str(tmp_path))
+    receiver.status = status or 204
+    project_id, experiment_id = _with_hooks(store, _hook(receiver.url, WebhookEvent.FAILED))
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.finish_run(run.id, models.RunStatus.FAILED, pendulum.now("UTC"))
+    run_task(app, WebhookTask.FIND)
+    if status is None:  # deleted between its delivery being queued and posted
+        store.put_scoped_setting(
+            WebhookKey.HOOKS, project_id, None, None, store.get_or_create_user(WEBHOOKS_PRINCIPAL)
+        )
+
+    run_task(app, WebhookTask.DELIVER)
+
+    scrape = serve_metrics().get_data(as_text=True)
+    assert scraped_total(scrape, "dlboard_webhook_deliveries_total", dlboard_webhook_outcome=outcome) == 1
+    posted = scraped_total(scrape, "dlboard_webhook_post_duration_seconds_count")
+    assert posted == (0 if status is None else 1)
 
 
 @pytest.mark.parametrize(

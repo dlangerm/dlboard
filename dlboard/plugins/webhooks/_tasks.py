@@ -25,6 +25,7 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard._compat import StrEnum
+from dlboard._telemetry import Attributes, attribute
 from dlboard.plugins.webhooks._hooks import (
     Failure,
     ProjectWebhooks,
@@ -39,6 +40,7 @@ from dlboard.plugins.webhooks._hooks import (
 )
 from dlboard.serve import RunEnded, get_system_data_store
 from dlboard.serve._custodian import NewWorkItem, get_system_task_store
+from dlboard.serve.telemetry import Counter, Unit
 
 if TYPE_CHECKING:
     from dlboard.models import DataStore
@@ -162,17 +164,47 @@ def _turn_off(store: DataStore[...], project_id: int, hook_id: str, why: str) ->
     _log.warning("Couldn't turn a webhook off: its project's webhooks kept changing", hook_id=hook_id)
 
 
-def _post(store: DataStore[...], delivery: Delivery) -> RefusedError | None:
-    """Post one delivery, if its webhook is still there and on; why not, if it didn't land."""
+class DeliveryOutcome(StrEnum):
+    """What became of one delivery this pass: the label of `dlboard.webhook.deliveries`."""
+
+    DELIVERED = "delivered"
+    UNWANTED = "unwanted"
+    """Its webhook was deleted or turned off since it was queued: dropped, not posted."""
+    RETRY = "retry"
+    """It didn't land (or its webhook already failed this pass): tried again later."""
+    REJECTED = "rejected"
+    """The receiver refused it outright (a 4xx): dropped, the webhook kept on."""
+    TURNED_OFF = "turned_off"
+    """It failed for the last time, or the receiver said it is gone: its webhook is turned off."""
+    EXPIRED = "expired"
+    """Its run ended longer ago than `DLBOARD_WEBHOOK_EXPIRE_H`: dropped, never posted that late."""
+
+
+class _WebhookLabel(StrEnum):
+    OUTCOME = "dlboard.webhook.outcome"
+
+
+@dataclass(frozen=True, slots=True)
+class _DeliveryAttributes(Attributes):
+    outcome: DeliveryOutcome = attribute(_WebhookLabel.OUTCOME)
+
+
+_SETTLED = Counter[_DeliveryAttributes](
+    "dlboard.webhook.deliveries", Unit.ITEMS, "Webhook deliveries settled, by what became of them."
+)
+
+
+def _post(store: DataStore[...], delivery: Delivery) -> RefusedError | DeliveryOutcome:
+    """Post one delivery, if its webhook is still there and on: whether it landed (or wasn't wanted), or why it didn't."""
     found = store.get_scoped_settings(WebhookKey.HOOKS, delivery.body.project.id).project
     hook = ProjectWebhooks.model_validate(found.value).find(delivery.hook_id) if found is not None else None
     if hook is None or hook.turned_off is not None:
-        return None
+        return DeliveryOutcome.UNWANTED
     try:
         send(hook, delivery.body, delivery_id(delivery.key))
     except RefusedError as refused:
         return refused
-    return None
+    return DeliveryOutcome.DELIVERED
 
 
 @dataclass
@@ -188,36 +220,52 @@ class _DeliveryPass:
     """Deliveries dropped unposted, their run having ended more than `DLBOARD_WEBHOOK_EXPIRE_H` ago."""
 
     def settle(self, item: WorkItem) -> None:
-        """Post one delivery, unless it expired or its webhook failed already this run, and settle its item by how it went."""
+        """Settle one delivery's item (see `_settled`), and count what became of it."""
+        _SETTLED.add(1, _DeliveryAttributes(outcome=self._settled(item)))
+
+    def _settled(self, item: WorkItem) -> DeliveryOutcome:
+        """Post one delivery, unless it expired or its webhook failed already this run; settle its item by how it went."""
         ctx, store, delivery = self.ctx, self.store, Delivery.model_validate(item.payload)
         if self.settings.expired(delivery.body.run.done_at):
             self.expired += 1
             ctx.done([item])
-            return
+            return DeliveryOutcome.EXPIRED
         try:
-            refused = self.down.get(delivery.hook_id) or _post(store, delivery)
+            posted = self.down.get(delivery.hook_id) or _post(store, delivery)
         except Exception as exc:  # noqa: BLE001 -- one delivery's failure must not stop the others
             _log.warning("A webhook delivery failed", exc_info=True)
             ctx.retry(item, f"{type(exc).__name__}: {exc}")
-            return
-        match refused:
-            case None:
+            return DeliveryOutcome.RETRY
+        match posted:
+            case DeliveryOutcome():
                 ctx.done([item])
-            case RefusedError(failure=Failure.REJECTED):
+                return posted
+            case RefusedError():
+                return self._refused(item, delivery, posted)
+
+    def _refused(self, item: WorkItem, delivery: Delivery, refused: RefusedError) -> DeliveryOutcome:
+        """Settle a delivery that didn't land, by why: dropped, tried again later, or its webhook turned off."""
+        ctx, store = self.ctx, self.store
+        match refused.failure:
+            case Failure.REJECTED:
                 _log.warning(
                     "A webhook refused a delivery; dropped it", hook_id=delivery.hook_id, why=str(refused)
                 )
                 ctx.done([item])
-            case RefusedError(failure=Failure.GONE):
+                return DeliveryOutcome.REJECTED
+            case Failure.GONE:
                 _turn_off(store, delivery.body.project.id, delivery.hook_id, f"Turned off: {refused}")
                 ctx.done([item])
-            case RefusedError(failure=Failure.RETRY) if item.attempts >= self.settings.attempts:
+                return DeliveryOutcome.TURNED_OFF
+            case Failure.RETRY if item.attempts >= self.settings.attempts:
                 why = f"Turned off after {item.attempts} failed deliveries: {refused}"
                 _turn_off(store, delivery.body.project.id, delivery.hook_id, why)
                 ctx.done([item])
-            case RefusedError(failure=Failure.RETRY):
+                return DeliveryOutcome.TURNED_OFF
+            case Failure.RETRY:
                 self.down[delivery.hook_id] = refused
                 ctx.retry(item, str(refused))
+                return DeliveryOutcome.RETRY
 
 
 def deliver(ctx: TaskContext) -> None:

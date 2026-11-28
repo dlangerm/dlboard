@@ -890,6 +890,106 @@
       ],
       "title": "Requests that waited out the pool",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 92
+      },
+      "id": 32,
+      "panels": [],
+      "title": "Webhooks",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "What became of each webhook delivery the custodian settled: delivered, tried again later, refused by its receiver, its webhook turned off, not wanted any more (its webhook deleted or off), or expired (its run ended longer ago than DLBOARD_WEBHOOK_EXPIRE_H).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 93
+      },
+      "id": 33,
+      "targets": [
+        {
+          "expr": "sum by (dlboard_webhook_outcome) (rate(dlboard_webhook_deliveries_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
+          "legendFormat": "{{dlboard_webhook_outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Webhook deliveries, by outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "How long a webhook post took, until it was answered or given up on (twice DLBOARD_WEBHOOK_TIMEOUT_S at the most).",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 93
+      },
+      "id": 34,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, dlboard_outcome) (rate(dlboard_webhook_post_duration_seconds_bucket{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval])))",
+          "legendFormat": "{{dlboard_outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Webhook post time (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Posts not made because the webhook's host resolves to an address that isn't public: an internal host an admin hasn't listed in DLBOARD_WEBHOOK_ALLOWED_HOSTS, or a URL aimed at the server's own network.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 93
+      },
+      "id": 35,
+      "targets": [
+        {
+          "expr": "sum(rate(dlboard_webhook_refused_addresses_total{job=~\"$job\", deployment_environment=~\"$environment\"}[$__rate_interval]))",
+          "legendFormat": "refused",
+          "refId": "A"
+        }
+      ],
+      "title": "Webhook posts refused for their address",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
