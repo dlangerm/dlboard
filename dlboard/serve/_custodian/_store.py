@@ -111,6 +111,10 @@ class TaskStore(Protocol):
         """How many of `kind`'s items are queued, claimed or not: a task's backlog."""
         ...
 
+    def queued_keys(self, kind: str, keys: Collection[str]) -> frozenset[str]:
+        """Which of `keys` have an item of `kind` queued, claimed or not: found by the unique `(kind, key)`."""
+        ...
+
 
 @dataclass(frozen=True)
 class WorkRule:
@@ -269,6 +273,10 @@ class AuthorizingTaskStore(TaskStore):
     def count_work(self, kind: str) -> int:
         self._require_read()
         return self._inner.count_work(kind)
+
+    def queued_keys(self, kind: str, keys: Collection[str]) -> frozenset[str]:
+        self._require_read()
+        return self._inner.queued_keys(kind, keys)
 
 
 def get_task_store() -> TaskStore:

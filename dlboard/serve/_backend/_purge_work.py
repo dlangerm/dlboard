@@ -52,11 +52,16 @@ def blob_deletion(artifact_id: int, ref: str, requested_by: int) -> NewWorkItem:
     )
 
 
+def entity_purge_key(entity_type: models.EntityType, entity_id: int) -> str:
+    """The key an entity's purge is queued under: the Trash reads it back to say the purge is under way."""
+    return f"{entity_type}:{entity_id}"
+
+
 def entity_purge(entity_type: models.EntityType, entity_id: int, requested_by: int) -> NewWorkItem:
     """The work item that purges an entity: one an entity, however often it is asked for."""
     return NewWorkItem(
         kind=PurgeWork.ENTITY,
-        key=f"{entity_type}:{entity_id}",
+        key=entity_purge_key(entity_type, entity_id),
         payload=EntityPurge(
             entity_type=entity_type, entity_id=entity_id, requested_by=requested_by
         ).model_dump(mode="json"),

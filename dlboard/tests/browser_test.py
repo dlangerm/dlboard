@@ -1991,10 +1991,15 @@ def test_a_view_branched_by_an_edit_can_be_deleted_without_a_reload(
     assert console_errors == []
 
 
-def test_a_purge_returns_at_once_and_its_entity_leaves_the_trash_when_it_is_done(
+def test_a_purge_returns_at_once_says_it_is_under_way_and_leaves_the_trash_when_it_is_done(
     page: Page, live_server_url: str, console_errors: list[str], dlboard_app: Dash
 ) -> None:
-    """A large purge took the request with it and left the page unresponsive; it runs behind the page now (#429)."""
+    """
+    A large purge took the request with it and left the page unresponsive; it runs behind the page now (#429).
+
+    Until it is done, the Trash it reloads to says so, in place of the row's Restore and Purge: before, the row looked
+    untouched, as if the purge had been lost, and could still be restored halfway through it.
+    """
     page.goto(
         f"{live_server_url}/admin"
     )  # first, so the browser's own user is there (the first user is the admin)
@@ -2008,12 +2013,14 @@ def test_a_purge_returns_at_once_and_its_entity_leaves_the_trash_when_it_is_done
     row.get_by_role("button", name="Purge").click()
     page.locator(f"#{ADMIN_PURGE_CONFIRM_ID}").click()
 
-    expect(page).to_have_url(re.compile(r"/admin$"))
+    expect(page).to_have_url(re.compile(r"/admin\?tab=trash$"))
     tasks = get_system_task_store()
     _wait_until(
         lambda: [tasks.count_work(PurgeWork.ENTITY)], [1]
     )  # queued by the callback, not purged by the request
     assert [p.id for p in store.list_deleted_projects()] == [project.id]
+    expect(row.get_by_text("Purging…")).to_be_visible()
+    expect(row.get_by_role("button")).to_have_count(0)
     run_task(dlboard_app, PurgeTask.ENTITIES)  # the custodian's part, which tests never start
     page.reload()
     expect(row).to_have_count(0)

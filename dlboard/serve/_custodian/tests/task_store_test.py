@@ -109,6 +109,19 @@ def test_work_is_queued_once_a_key_and_claimed_in_batches_that_never_overlap(
     assert store.count_work("blob") == 2
 
 
+def test_the_keys_asked_about_that_are_queued_are_those_of_the_kind_claimed_or_not_until_done(
+    store: SQLStoreBase[Any],
+) -> None:
+    _queue(store, 3)
+    _queue(store, 5, kind="other")
+    (claimed,) = store.claim_work("blob", "a", limit=1, until=_later(minutes=5))
+
+    assert store.queued_keys("blob", ["0", "2", "4", "nope"]) == {"0", "2"}
+    store.complete_work([claimed.id])
+    assert store.queued_keys("blob", ["0", "2", "4"]) == {"2"}
+    assert store.queued_keys("blob", []) == frozenset()
+
+
 def test_a_claim_that_runs_out_is_claimed_again_and_a_retried_item_waits_its_turn(
     store: SQLStoreBase[Any], clock: Clock
 ) -> None:
