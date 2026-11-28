@@ -441,6 +441,8 @@ Other kinds of summary (text, audio, PR curves, ...) are left out, and the comma
 A run is marked finished when its event files last wrote, and again if it writes more later.
 
 An import is incremental: how far it read each event file is kept in `.dlboard-import.json` in the logdir (or `--state`), so running it again brings only what is new, and an event file cut short by a killed run is read up to its last whole record.
+That file is saved after every batch it sends, so an import stopped partway (killed, or the server gone down) goes on from there next time, logging no step twice.
+A record that can't be read, or that the server refuses for good, is skipped with a warning naming where it is, and the rest is imported.
 It reads event files itself, with no TensorFlow or `tensorboard` package, and writes through the REST API like any run (an API token in `DLBOARD_API_KEY`), so it can import into a server elsewhere.
 From Python, `dlboard.client.tensorboard.import_logdir(api, logdir, project=...)` does the same and returns what it imported.
 
@@ -460,7 +462,9 @@ A folder an older client wrote stays readable by a newer server.
 A folder that can't be written fails the run as it starts, not partway through.
 
 Syncing is incremental: how far each file was read, and which run each one became, are kept in `.dlboard-sync.json` in the folder, per server.
-Syncing again sends only what is new, an interrupted sync picks up where it stopped, and a run still logging (`--watch SECONDS`, which `serve local --logdir` does for you) is followed as it goes.
+Syncing again sends only what is new, an interrupted sync picks up where it stopped (making no run twice), and a run still logging (`--watch SECONDS`, which `serve local --logdir` does for you) is followed as it goes.
 A run killed mid-write is read up to its last whole call.
+A call that can never be sent (a line that can't be read, or one the server refuses for good) is skipped with a warning, and the rest is synced; one that stops the sync (the server down, credentials it refuses) is sent again next time.
+With `--watch`, a pass that fails is logged and the next one tried as usual.
 An offline run can't be attached to with `run_id=` until it is synced.
 `serve local --tensorboard-logdir DIR` follows a [TensorBoard logdir](#importing-a-tensorboard-logdir) the same way.

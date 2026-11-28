@@ -23,6 +23,7 @@ from pydantic import AnyUrl, AwareDatetime, BaseModel, FilePath, PositiveFloat, 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard import models
+from dlboard._batching import Failure
 from dlboard._content_encoding import ContentEncoding, compress
 from dlboard._identity import resolve_username
 from dlboard._telemetry import Attributes, attribute
@@ -72,13 +73,47 @@ DEFAULT_SERVER_URL: Final = "http://localhost:8050"
 """Matches `dlboard serve local`'s own default host/port (see `ServerRuntimeOptions` in `_cli.py`)."""
 
 
+_TRANSIENT_CLIENT_ERRORS: Final = frozenset({HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS})
+_ITEM_CLIENT_ERRORS: Final = frozenset(
+    {
+        HTTPStatus.BAD_REQUEST,
+        HTTPStatus.CONFLICT,
+        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+        HTTPStatus.UNPROCESSABLE_ENTITY,
+    }
+)
+"""The 4xx a server answers about what a batch holds, so a batch without the offending item can still land."""
+
+
+def classify_failure(exc: Exception) -> Failure:
+    """
+    What a failure to send a batch says about it (see `Failure`): a run's shipping processes, a sync and an import ask.
+
+    Transient: the server or network is down or busy -- a connection error, a timeout, a 5xx, or a 408/429, which
+    only ask to retry later. Per item: something in the batch can never be sent, so the batch is split to find it --
+    a 4xx about what was sent (an invalid item, a duplicate, a batch grown past `DLBOARD_MAX_UPLOAD_MB` while the
+    server was down), or an error here, such as a `File` whose path is gone. Whole: a 4xx that refuses the request
+    itself, whatever is in it -- credentials, access, a run that is gone, a locked project -- so no part of it lands.
+    """
+    match exc:
+        case requests.ConnectionError() | requests.Timeout():
+            return Failure.TRANSIENT
+        case requests.HTTPError(response=requests.Response() as response):
+            status = response.status_code
+            if status >= HTTPStatus.INTERNAL_SERVER_ERROR or status in _TRANSIENT_CLIENT_ERRORS:
+                return Failure.TRANSIENT
+            return Failure.PER_ITEM if status in _ITEM_CLIENT_ERRORS else Failure.WHOLE
+        case _:
+            return Failure.PER_ITEM
+
+
 def _raise_for_status(res: requests.Response) -> None:
     """
     `res.raise_for_status()`, with what the server said and its request id in the message when it sent them.
 
     A bare "500 Server Error" says nothing about *which* request failed; the id is what finds that request's
     line (and traceback) in the server's log. A 4xx's `error` says why it was refused (a project that takes no
-    new runs for now, say). The response stays on the error, for `classify_failure` (`dlboard/client/run.py`).
+    new runs for now, say). The response stays on the error, for `classify_failure`.
     """
     try:
         res.raise_for_status()

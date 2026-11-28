@@ -33,6 +33,7 @@ from dlboard._batching import Failure
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard.client import _context, run
 from dlboard.client._console import ConsoleChunk, ConsoleSettings
+from dlboard.client._rest_api import classify_failure
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import Overlay
@@ -371,7 +372,7 @@ def test_hyperparameters_the_server_cannot_take_never_fail_the_script(
     ],
 )
 def test_classify_failure_retries_only_what_a_retry_can_fix(failure: Exception, kind: Failure) -> None:
-    assert run.classify_failure(failure) is kind
+    assert classify_failure(failure) is kind
 
 
 class _FakeProcess:

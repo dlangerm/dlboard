@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import atexit
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import numpy as np
 import pendulum
 import pytest
+import requests
 
 from dlboard import models
 from dlboard.client import _offline, run
@@ -105,6 +106,73 @@ def test_a_sync_sends_a_line_cut_short_only_once_it_is_whole(
     (synced,) = _server_runs(backend_server, "cut")
     assert (before.calls, after.calls) == (1, 1)
     assert list(backend_server.store.fetch_metrics(synced.experiment_id, run_ids=None).step) == [0, 1]
+
+
+def _offline_run(folder: Path, name: str, steps: int) -> Path:
+    """A run of `steps` metric calls logged to `folder`, as `OfflineAPI` writes one; its segment file."""
+    offline = _offline.OfflineAPI(folder)
+    offline.whoami()
+    experiment = offline.get_or_create_experiment(offline.get_or_create_project(name).id, name)
+    local = offline.create_run(models.NewRun(experiment_id=experiment.id, name=name))
+    for step in range(steps):
+        offline.log_metric_batch(
+            [
+                models.LoggedMetrics(
+                    experiment_id=experiment.id,
+                    run_id=local.id,
+                    step=step,
+                    metrics={"loss": 1.0},
+                    timestamp_utc=pendulum.now("UTC"),
+                )
+            ]
+        )
+    (segment,) = folder.glob(f"run-{local.id}/*.jsonl")
+    return segment
+
+
+class _DownAfter(BasicDlboardAPI):
+    """A server that goes down after taking `calls` metric batches: a sync stopped partway, as a killed one is."""
+
+    def __init__(self, url: str, calls: int) -> None:
+        super().__init__(url)
+        self.calls = calls
+
+    @override
+    def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None:
+        if self.calls == 0:
+            msg = "the server went down"
+            raise requests.ConnectionError(msg)
+        self.calls -= 1
+        super().log_metric_batch(metrics)
+
+
+@pytest.mark.parametrize("taken", [0, 2], ids=["before-its-first-call", "partway"])
+def test_a_sync_stopped_partway_makes_no_run_twice_and_sends_nothing_twice(
+    backend_server: BackendServer, tmp_path: Path, taken: int
+) -> None:
+    _offline_run(tmp_path / "offline", f"stopped-{taken}", steps=4)
+
+    with pytest.raises(requests.ConnectionError):
+        _offline.sync(_DownAfter(backend_server.url, taken), tmp_path / "offline")
+    resumed = _offline.sync(BasicDlboardAPI(backend_server.url), tmp_path / "offline")
+
+    (synced,) = _server_runs(backend_server, f"stopped-{taken}")
+    assert resumed.calls == 4 - taken
+    assert list(backend_server.store.fetch_metrics(synced.experiment_id, run_ids=None).step) == [0, 1, 2, 3]
+
+
+def test_a_call_that_can_never_be_sent_is_skipped_and_the_rest_synced(
+    backend_server: BackendServer, tmp_path: Path
+) -> None:
+    segment = _offline_run(tmp_path / "offline", "skipped", steps=3)
+    first, *rest = segment.read_bytes().splitlines(keepends=True)
+    segment.write_bytes(b"".join([first, b'{"call": "metrics", "body": "not a batch"}\n', *rest]))
+
+    with pytest.warns(UserWarning, match="skipped a call of run-"):
+        _offline.sync(BasicDlboardAPI(backend_server.url), tmp_path / "offline")
+
+    (synced,) = _server_runs(backend_server, "skipped")
+    assert list(backend_server.store.fetch_metrics(synced.experiment_id, run_ids=None).step) == [0, 1, 2]
 
 
 def test_a_run_is_offline_when_its_url_is_a_folder_or_dlboard_offline_dir_names_one(

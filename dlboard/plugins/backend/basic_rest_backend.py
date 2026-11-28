@@ -429,7 +429,7 @@ _ERROR_STATUSES: Final[tuple[tuple[type[Exception], HTTPStatus], ...]] = (
 """
 The status each of the errors a request can be refused with is answered with, instead of Flask's default 500.
 
-The client's shipping processes go by the difference (`dlboard.client.run.classify_failure`): a 4xx is never sent again,
+The client's shipping processes go by the difference (`dlboard.client._rest_api.classify_failure`): a 4xx is never sent again,
 a 5xx is retried. So an error that a retry can't get past must be a 4xx here, or a client retries it forever.
 """
 

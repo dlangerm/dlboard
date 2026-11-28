@@ -222,21 +222,42 @@ _FOLLOW_INTERVAL_S: Final = 10.0
 """How often `serve local` looks for what is new in a folder it follows."""
 
 
+def _bring_in(bring: Callable[[], object], every: float | None, say: Callable[[str], object]) -> None:
+    """
+    `bring()` once, or every `every` seconds for as long as this runs, saying (`say`) what each pass brought in.
+
+    Run once, a failure is the command's own. Repeated, a pass that fails is logged and the next is tried as usual, going
+    on from where the last stopped (`dlboard.client._resumable`); a server not answering (not up yet, or restarting) is
+    waited out quietly.
+    """
+    while True:
+        try:
+            say(f"Brought in {bring()}")
+        except requests.ConnectionError:
+            if every is None:
+                raise
+            _log.debug("The server is not answering")
+        except Exception:
+            if every is None:
+                raise
+            _log.warning(
+                "Bringing in what is new failed; the next pass goes on from where it stopped", exc_info=True
+            )
+        if every is None:
+            return
+        time.sleep(every)
+
+
 def _follow(bring: Callable[[BasicDlboardAPI], object], server: str) -> None:
     """
     Bring what is new into the server at `server` (`bring(api)`) every `_FOLLOW_INTERVAL_S`, for as long as it runs.
 
-    Its own process, which dies with the server's (`die_with_parent`). A server not up yet, or going down, is waited out.
+    Its own process, which dies with the server's (`die_with_parent`).
     """
     die_with_parent()
     _configure_logging()
     api = BasicDlboardAPI(server)
-    while True:
-        try:
-            _log.info(f"Brought in {bring(api)}")
-        except requests.ConnectionError:
-            _log.debug("The server is not answering yet")
-        time.sleep(_FOLLOW_INTERVAL_S)
+    _bring_in(functools.partial(bring, api), _FOLLOW_INTERVAL_S, _log.info)
 
 
 def _start_following(opts: LocalServeOptions) -> None:
@@ -371,15 +392,15 @@ def tensorboard(
 ) -> None:
     """Import a TensorBoard logdir: the logdir is an experiment, and each directory of event files in it a run."""
     _configure_logging()
-    api = BasicDlboardAPI(opts.server)
-    while True:
-        report = import_logdir(
-            api, logdir, project=opts.project, experiment=opts.experiment, state_path=opts.state
-        )
-        _log.warning(f"Imported {report}")
-        if opts.watch is None:
-            return
-        time.sleep(opts.watch)
+    bring = functools.partial(
+        import_logdir,
+        BasicDlboardAPI(opts.server),
+        logdir,
+        project=opts.project,
+        experiment=opts.experiment,
+        state_path=opts.state,
+    )
+    _bring_in(bring, opts.watch, _log.warning)
 
 
 @app.command(name="sync")
@@ -398,12 +419,7 @@ def sync_folder(
 ) -> None:
     """Send the runs logged offline to `folder` to a server: only what is new since the last sync of it there."""
     _configure_logging()
-    api = BasicDlboardAPI(server)
-    while True:
-        _log.warning(f"Synced {sync(api, folder)}")
-        if watch is None:
-            return
-        time.sleep(watch)
+    _bring_in(functools.partial(sync, BasicDlboardAPI(server), folder), watch, _log.warning)
 
 
 @app.command(name="run-token")
