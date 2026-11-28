@@ -86,6 +86,20 @@ class NewUser(BaseModel, frozen=True, extra="forbid"):
     scopes: list[Scope] = []
     """Granted site-wide permissions. Empty by default: showing up under a new identity grants nothing."""
 
+    admin_from_group: bool = False
+    """
+    Whether this user's `Scope.ALL` came from `DLBOARD_ADMIN_GROUPS` alone: then a sign-in without the group takes it
+    away again. An admin made any other way (by name, by hand, the bootstrap admin) is kept.
+    """
+
+    signed_in_at: AwareDatetime | None = None
+    """
+    When this user last signed in through their auth provider (a browser, not a token), to the hour; `None` if never.
+
+    With `DLBOARD_TOKEN_IDLE_DAYS` set, the tokens of a user who hasn't for that long stop working: someone the identity
+    provider no longer lets in can't go on logging with a token made before.
+    """
+
     created_at: AwareDatetime = Field(default_factory=lambda: pendulum.now(pendulum.UTC))
     """When this user was first seen."""
 

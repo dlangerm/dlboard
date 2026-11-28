@@ -346,10 +346,14 @@ def apply_user_action(store: DataStore[...], user: User, action: UserAction) -> 
             update: dict[str, Any] = {"disabled_at": None}
         case UserAction.DISABLE:
             update = {"disabled_at": pendulum.now(pendulum.UTC)}
+        # By hand, an admin is an admin's to undo, whatever group they are in: no sign-in takes it away again.
         case UserAction.GRANT_ADMIN:
-            update = {"scopes": [*user.scopes, models.Scope.ALL]}
+            update = {"scopes": [*user.scopes, models.Scope.ALL], "admin_from_group": False}
         case UserAction.REVOKE_ADMIN:
-            update = {"scopes": [s for s in user.scopes if s is not models.Scope.ALL]}
+            update = {
+                "scopes": [s for s in user.scopes if s is not models.Scope.ALL],
+                "admin_from_group": False,
+            }
     return store.update_user(user.model_copy(update=update))
 
 
@@ -372,6 +376,15 @@ def _user_row(user: User, actor: User) -> Component:
             dmc.TableTd(dmc.Text(user.username, fw=600, size="sm")),
             dmc.TableTd(dmc.Text(user.email or "-", size="sm", c="dimmed")),
             dmc.TableTd(dmc.Badge(user.issuer, variant="light", color="gray", size="sm")),
+            dmc.TableTd(
+                dmc.Text(
+                    "never"
+                    if user.signed_in_at is None
+                    else pendulum.instance(user.signed_in_at).diff_for_humans(),
+                    size="sm",
+                    c="dimmed",
+                )
+            ),
             dmc.TableTd(
                 dmc.Group(
                     [
@@ -425,7 +438,12 @@ def _render_users(store: DataStore[...], actor: User, admin_url: str | None) -> 
             dmc.Table(
                 [
                     dmc.TableThead(
-                        dmc.TableTr([dmc.TableTh(h) for h in ("User", "Email", "Signs in via", "", "")])
+                        dmc.TableTr(
+                            [
+                                dmc.TableTh(h)
+                                for h in ("User", "Email", "Signs in via", "Last signed in", "", "")
+                            ]
+                        )
                     ),
                     dmc.TableTbody([_user_row(u, actor) for u in store.get_users()]),
                 ],

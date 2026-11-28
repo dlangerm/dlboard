@@ -12,11 +12,12 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from dlboard import models
-from dlboard.serve._backend import _api_tokens
+from dlboard.serve._backend import _api_tokens, _auth
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from dlboard.conftest import Clock
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
@@ -51,6 +52,36 @@ def test_a_revoked_token_or_disabled_owner_stops_authenticating(
     invalidate(store, token, owner)
 
     assert _api_tokens.user_for_token(store, raw) is None
+
+
+def test_a_token_stops_while_its_owner_has_not_signed_in_for_the_idle_time(
+    store: SQLLiteStore, clock: Clock
+) -> None:
+    """Removed from the identity provider, its owner can't sign in, so a token made before stops with them (#822)."""
+    principal = models.Principal(issuer="idp", subject="ann", username="ann")
+    owner = _auth.sign_in(store, principal, _auth.AuthSettings())
+    assert owner is not None
+    _, raw = _api_tokens.mint_api_token(store, owner, "ci")
+    idle_for = pendulum.duration(days=30)
+
+    clock.advance(days=29)
+    assert _api_tokens.user_for_token(store, raw, idle_for) is not None
+    clock.advance(days=2)
+    assert _api_tokens.user_for_token(store, raw, idle_for) is None
+    assert _api_tokens.user_for_token(store, raw) is not None  # with no idle time, never
+    _auth.sign_in(store, principal, _auth.AuthSettings())
+    assert _api_tokens.user_for_token(store, raw, idle_for) is not None
+
+
+def test_an_owner_who_never_signed_in_idles_from_when_they_were_made(
+    store: SQLLiteStore, clock: Clock
+) -> None:
+    owner = store.get_or_create_user(models.Principal(issuer="idp", subject="bot", username="bot"))
+    _, raw = _api_tokens.mint_api_token(store, owner, "ci")
+
+    clock.advance(days=31)
+
+    assert _api_tokens.user_for_token(store, raw, pendulum.duration(days=30)) is None
 
 
 def test_an_expired_token_stops_authenticating(store: SQLLiteStore) -> None:
