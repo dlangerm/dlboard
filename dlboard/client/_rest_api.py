@@ -49,6 +49,7 @@ from dlboard._wire import (
     Read,
     Resource,
     RunCall,
+    RunHyperparams,
     RunToken,
     create_path,
     entity_path,
@@ -609,7 +610,7 @@ class BasicDlboardAPI:
             _paging(cursor, limit),
         )
 
-    def hyperparams(self, run_id: int) -> dict[str, Any]:
+    def hyperparams(self, run_id: int) -> models.FlatHparamDict:
         """A run's hyperparameters, flattened as it logged them: empty if it logged none."""
         res = self._send(
             "GET",
@@ -617,7 +618,7 @@ class BasicDlboardAPI:
             path=read_path(Resource.RUNS, Read.HYPERPARAMS, str(run_id)),
         )
         _raise_for_status(res)
-        return dict(res.json())
+        return RunHyperparams.model_validate(res.json()).root
 
     def summary(
         self, run_id: int, *, cursor: str | None = None, limit: int | None = None

@@ -49,89 +49,89 @@ class _FakeArtifactStore:
 
 
 def test_handle_create_project_stamps_created_by(store: SQLLiteStore) -> None:
-    body = models.NewProject(name="p", description="d").model_dump(mode="json")
+    body = models.NewProject(name="p", description="d")
     actor = store.get_or_create_user(models.Principal.unverified("alice"))
 
     result = backend.handle_create_project(store, body, actor)
 
-    assert result["created_by"] == actor.id
-    assert store.get_project(result["id"]) == models.Project.model_validate(result)
+    assert result.created_by == actor.id
+    assert store.get_project(result.id) == result
 
 
 def test_handle_create_experiment_stamps_created_by(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
-    body = models.NewExperiment(project_id=project.id).model_dump(mode="json")
+    body = models.NewExperiment(project_id=project.id)
     actor = store.get_or_create_user(models.Principal.unverified("bob"))
 
     result = backend.handle_create_experiment(store, body, actor)
 
-    assert result["created_by"] == actor.id
+    assert result.created_by == actor.id
 
 
 def test_handle_get_or_create_project_creates_on_first_call(store: SQLLiteStore) -> None:
-    body = backend.GetOrCreateProject(name="p", description="d").model_dump(mode="json")
+    body = backend.GetOrCreateProject(name="p", description="d")
     actor = store.get_or_create_user(models.Principal.unverified("alice"))
 
     result = backend.handle_get_or_create_project(store, body, actor)
 
-    assert result["name"] == "p"
-    assert result["created_by"] == actor.id
+    assert result.name == "p"
+    assert result.created_by == actor.id
 
 
 def test_handle_get_or_create_project_reuses_an_existing_project_by_name(store: SQLLiteStore) -> None:
     existing = store.create_project(models.NewProject(name="p", description="d"))
-    body = backend.GetOrCreateProject(name="p", description="ignored").model_dump(mode="json")
+    body = backend.GetOrCreateProject(name="p", description="ignored")
     actor = store.get_or_create_user(models.Principal.unverified("alice"))
 
     result = backend.handle_get_or_create_project(store, body, actor)
 
-    assert result["id"] == existing.id
-    assert result["description"] == "d"
+    assert result.id == existing.id
+    assert result.description == "d"
 
 
 def test_handle_get_or_create_experiment_creates_on_first_call(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
-    body = backend.GetOrCreateExperiment(project_id=project.id, name="default").model_dump(mode="json")
+    body = backend.GetOrCreateExperiment(project_id=project.id, name="default")
     actor = store.get_or_create_user(models.Principal.unverified("bob"))
 
     result = backend.handle_get_or_create_experiment(store, body, actor)
 
-    assert result["name"] == "default"
-    assert result["created_by"] == actor.id
+    assert result.name == "default"
+    assert result.created_by == actor.id
 
 
 def test_handle_get_or_create_experiment_passes_source_through(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     body = backend.GetOrCreateExperiment(
         project_id=project.id, name="default", source=models.ExperimentSource.PYTORCH_LIGHTNING
-    ).model_dump(mode="json")
+    )
     actor = store.get_or_create_user(models.Principal.unverified("bob"))
 
     result = backend.handle_get_or_create_experiment(store, body, actor)
 
-    assert result["source"] == models.ExperimentSource.PYTORCH_LIGHTNING
+    assert result.source == models.ExperimentSource.PYTORCH_LIGHTNING
 
 
 def test_handle_get_or_create_experiment_reuses_an_existing_experiment_by_name(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     existing = store.create_experiment(models.NewExperiment(project_id=project.id, name="default"))
-    body = backend.GetOrCreateExperiment(project_id=project.id, name="default").model_dump(mode="json")
+    body = backend.GetOrCreateExperiment(project_id=project.id, name="default")
     actor = store.get_or_create_user(models.Principal.unverified("bob"))
 
     result = backend.handle_get_or_create_experiment(store, body, actor)
 
-    assert result["id"] == existing.id
+    assert result.id == existing.id
 
 
 def test_handle_create_run_stamps_created_by(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    body = models.NewRun(experiment_id=experiment.id).model_dump(mode="json")
+    body = models.NewRun(experiment_id=experiment.id)
     actor = store.get_or_create_user(models.Principal.unverified("carol"))
 
     result = backend.handle_create_run(store, body, actor)
 
-    assert result["created_by"] == actor.id
+    assert result.created_by == actor.id
 
 
 def test_handle_get_run_returns_a_live_run_and_404s_otherwise(
@@ -141,7 +141,7 @@ def test_handle_get_run_returns_a_live_run_and_404s_otherwise(
     deleted = store.create_run(models.NewRun(experiment_id=experiment_id))
     store.delete_run(deleted.id, store.get_or_create_user(models.Principal.unverified("heidi")))
 
-    assert models.Run.model_validate(backend.handle_get_run(store, run.id)) == run
+    assert backend.handle_get_run(store, run.id) == run
     for missing in (deleted.id, run.id + 1000):
         with pytest.raises(NotFound):
             backend.handle_get_run(store, missing)

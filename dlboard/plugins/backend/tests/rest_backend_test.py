@@ -8,6 +8,7 @@ import dash
 import pytest
 
 from dlboard import models
+from dlboard._wire import MarkRun
 from dlboard.models import PinColor, ProjectRole
 from dlboard.plugins.backend import basic_rest_backend as backend
 from dlboard.serve._backend._authorization import AuthorizingDataStore
@@ -104,10 +105,10 @@ def test_a_viewer_who_may_not_keep_a_run_has_not_pinned_it_either(store: SQLLite
 
     as_bob = AuthorizingDataStore(store, bob, enforce_grants=True)
     with pytest.raises(PermissionError):
-        backend.handle_mark_run(as_bob, run.id, {"keep": True, "pin": PinColor.RED}, bob)
+        backend.handle_mark_run(as_bob, run.id, MarkRun(keep=True, pin=PinColor.RED), bob)
 
     assert store.kept_runs(experiment.id, run_ids=None) == frozenset()
     assert store.pins_of(experiment.id, run_ids=None) == {}
     # A viewer may pin what they see, which is all this asks for.
-    backend.handle_mark_run(as_bob, run.id, {"pin": PinColor.RED}, bob)
+    backend.handle_mark_run(as_bob, run.id, MarkRun(pin=PinColor.RED), bob)
     assert list(store.pins_of(experiment.id, run_ids=None)) == [run.id]
