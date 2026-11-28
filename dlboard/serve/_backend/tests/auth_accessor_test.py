@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 import pendulum
@@ -14,6 +15,7 @@ from dlboard.plugins.auth.anonymous import AnonymousAuthProvider
 from dlboard.serve._backend import _auth
 
 if TYPE_CHECKING:
+    from dlboard.conftest import Clock
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
@@ -62,6 +64,49 @@ def test_sign_in_grants_configured_admins(
 
     assert user is not None
     assert (models.Scope.ALL in user.scopes) is is_admin
+
+
+class _MadeAdmin(StrEnum):
+    BY_GROUP = "by-group"
+    BY_NAME = "by-name"
+    BY_HAND = "by-hand"
+
+
+@pytest.mark.parametrize(
+    ("made", "kept"), [(_MadeAdmin.BY_GROUP, False), (_MadeAdmin.BY_NAME, True), (_MadeAdmin.BY_HAND, True)]
+)
+def test_leaving_the_admin_group_takes_away_only_the_admin_it_gave(
+    store: SQLLiteStore, made: _MadeAdmin, kept: bool
+) -> None:
+    """The identity provider owns who is in a group (#822); an admin made another way is the admin page's to undo."""
+    settings = _auth.AuthSettings(admin_users=["root"], admin_groups=["platform-admins"])
+    name = "root" if made is _MadeAdmin.BY_NAME else "someone"
+    match made:
+        case _MadeAdmin.BY_GROUP | _MadeAdmin.BY_NAME:
+            _auth.sign_in(store, _principal(name, "platform-admins"), settings)
+        case _MadeAdmin.BY_HAND:
+            user = store.get_or_create_user(_principal(name, "platform-admins"))
+            store.update_user(user.model_copy(update={"scopes": [models.Scope.ALL]}))
+
+    left = _auth.sign_in(store, _principal(name, "ml-team"), settings)
+
+    assert left is not None
+    assert (models.Scope.ALL in left.scopes) is kept
+
+
+def test_a_sign_in_is_noted_at_most_once_an_hour(store: SQLLiteStore, clock: Clock) -> None:
+    """A provider that signs a browser in on every request (`trusted_header`) must not write on every request."""
+    first = _auth.sign_in(store, _principal("ann"), _auth.AuthSettings())
+    clock.advance(minutes=59)
+    again = _auth.sign_in(store, _principal("ann"), _auth.AuthSettings())
+    clock.advance(minutes=2)
+    later = _auth.sign_in(store, _principal("ann"), _auth.AuthSettings())
+
+    assert first is not None
+    assert again is not None
+    assert later is not None
+    assert first.signed_in_at == again.signed_in_at
+    assert later.signed_in_at == clock.now("UTC")
 
 
 def test_sign_in_never_makes_the_first_verified_user_an_admin(store: SQLLiteStore) -> None:

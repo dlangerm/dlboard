@@ -953,11 +953,13 @@ class AuthorizingDataStore(models.DataStore[[]]):
         self._inner.tag_runs(run_ids, names, self._bound(actor))
 
     def untag_runs(self, run_ids: frozenset[int], names: frozenset[str]) -> None:
+        self._require_in_run_scope(run_ids)
         for project_id in self._run_projects(self._inner.run_experiments(run_ids)) or {None}:
             self._require(project_id, ProjectRole.EDITOR)
         self._inner.untag_runs(run_ids, names)
 
     def run_tags(self, run_ids: frozenset[int]) -> dict[int, list[str]]:
+        self._require_in_run_scope(run_ids)
         for project_id in self._run_projects(self._inner.run_experiments(run_ids)):
             self._require(project_id, ProjectRole.VIEWER)
         return self._inner.run_tags(run_ids)

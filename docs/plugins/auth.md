@@ -110,7 +110,8 @@ Either way, a new account sees only the projects that let it: one shared with it
 | --- | --- | --- |
 | `DLBOARD_SECRET_KEY` | — (required) | Signs session cookies. Startup fails without it. |
 | `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames made admin whenever they sign in. |
-| `DLBOARD_ADMIN_GROUPS` | none | Comma-separated IdP groups whose members are made admin. |
+| `DLBOARD_ADMIN_GROUPS` | none | Comma-separated IdP groups whose members are made admin, and stop being one when they leave the group. |
+| `DLBOARD_TOKEN_IDLE_DAYS` | unset (never) | Tokens of someone who hasn't signed in for this many days stop working. |
 | `DLBOARD_NEW_PROJECT_ACCESS` | unset (private) | `viewer`/`editor`: what everyone signed in gets on a new project. |
 | `DLBOARD_SESSION_LIFETIME_HOURS` | 336 | How long a browser stays signed in. |
 | `DLBOARD_SECURE_COOKIES` | `true` | Turn off only for plain-HTTP testing. |
@@ -156,9 +157,14 @@ Authelia sends `Remote-User`, `Remote-Email` and `Remote-Groups`; Pomerium sends
   If people can choose their own username in the identity provider, grant admin by group (`DLBOARD_ADMIN_GROUPS`), not by name: anyone could otherwise take a name in `DLBOARD_ADMIN_USERS` that hasn't signed in yet.
 - **A project can be shared with someone once they have visited.**
   Before that, the Sharing tab doesn't know the name; share with one of their groups instead, which works for people who haven't visited yet ([#821](https://github.com/dlangerm/dlboard/issues/821)).
-- **When someone leaves, disable them in Admin → Users.**
-  Removing them from the identity provider stops the proxy signing them in, but their API tokens keep working, since a token never goes through the proxy, and their groups stay as the proxy last sent them ([#822](https://github.com/dlangerm/dlboard/issues/822)).
-  A disabled user can't use the app or any token.
+- **When someone leaves, set `DLBOARD_TOKEN_IDLE_DAYS`, or disable them in Admin → Users.**
+  Removing them from the identity provider stops the proxy signing them in, but a token never goes through the proxy.
+  With `DLBOARD_TOKEN_IDLE_DAYS` set, their tokens (API and run tokens) stop working once they haven't signed in through the proxy for that many days; unset, the tokens keep working until each expires or is revoked.
+  Disabling them stops everything at once: a disabled user can't use the app or any token.
+  Their groups stay as the proxy last sent them until they sign in again ([#822](https://github.com/dlangerm/dlboard/issues/822)).
+- **Admin from a group lasts as long as the group does.**
+  Someone made admin by `DLBOARD_ADMIN_GROUPS` alone stops being one the first time the proxy signs them in without the group.
+  An admin made any other way (by `DLBOARD_ADMIN_USERS`, or from Admin → Users) is kept until it's taken away there.
 - **A training script signs in with an API token, not the proxy.**
   A token works from anywhere, so a script can talk to dlboard directly or through the proxy, if the proxy lets bearer tokens through.
 - **Signing out is the proxy's to do:** the headers sign a browser in again on its next request.

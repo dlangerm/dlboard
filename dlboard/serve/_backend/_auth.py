@@ -113,7 +113,21 @@ class AuthSettings(BaseSettings):
     """Comma-separated usernames granted `Scope.ALL` whenever they sign in -- how the first admin is made."""
 
     admin_groups: CommaSeparated[list[str]] = []
-    """Comma-separated IdP groups whose members are granted `Scope.ALL` whenever they sign in."""
+    """
+    Comma-separated IdP groups whose members are granted `Scope.ALL` whenever they sign in, and lose it at a sign-in
+    without the group (unless they were made admin some other way).
+    """
+
+    token_idle_days: PositiveInt | None = None
+    """
+    Turn a user's tokens (API and run tokens) off once they haven't signed in through the auth provider for this many
+    days: someone removed from the identity provider can't go on with a token made before. Unset, tokens never idle out.
+    """
+
+    @property
+    def token_idle(self) -> pendulum.Duration | None:
+        """`token_idle_days`, as a duration."""
+        return None if self.token_idle_days is None else pendulum.duration(days=self.token_idle_days)
 
     new_project_access: models.ProjectRole | None = None
     """The `Project.everyone_role` a newly created project starts with. Unset keeps new projects private."""
@@ -204,21 +218,51 @@ def get_current_user() -> User:
     return user
 
 
+def _admin_now(user: User, principal: models.Principal, settings: AuthSettings) -> User:
+    """
+    `user`, made or unmade a configured admin by this sign-in: made one if `settings` names them, or a group of theirs.
+
+    One made admin by a group alone is noted so, and loses it at a sign-in without the group: the identity provider
+    owns who is in it. An admin made any other way is never taken away here; that is done deliberately, on the admin
+    page.
+    """
+    by_name = user.username in settings.admin_users
+    by_group = bool(principal.groups & set(settings.admin_groups))
+    match (models.Scope.ALL in user.scopes, by_name or by_group, user.admin_from_group):
+        case (False, True, _):
+            _log.info("Granting configured admin scopes to user %s (%s)", user.id, user.username)
+            return user.model_copy(
+                update={"scopes": [*user.scopes, models.Scope.ALL], "admin_from_group": not by_name}
+            )
+        case (True, False, True):
+            _log.info("Taking admin from user %s (%s): no longer in an admin group", user.id, user.username)
+            kept = [scope for scope in user.scopes if scope is not models.Scope.ALL]
+            return user.model_copy(update={"scopes": kept, "admin_from_group": False})
+        case (True, True, True) if by_name:  # named an admin now: no group's to take away
+            return user.model_copy(update={"admin_from_group": False})
+        case _:
+            return user
+
+
+_SIGNED_IN_EVERY: Final = pendulum.duration(hours=1)
+"""How often at most `User.signed_in_at` is written: far within any `DLBOARD_TOKEN_IDLE_DAYS`."""
+
+
 def sign_in(store: DataStore[...], principal: models.Principal, settings: AuthSettings) -> User | None:
     """
     The user `principal` is (created on first sign-in), or `None` if they've been disabled.
 
-    Grants `Scope.ALL` to anyone `settings.admin_users`/`admin_groups` names. Only ever adds it --
-    revoking an admin is done deliberately, from the admin page.
+    Grants or takes away a configured admin (`_admin_now`), and notes when they signed in (`User.signed_in_at`), at most
+    once `_SIGNED_IN_EVERY`: a provider that signs a browser in on every request (`trusted_header`) mustn't write each.
     """
     user = store.get_or_create_user(principal)
-    is_configured_admin = user.username in settings.admin_users or bool(
-        principal.groups & set(settings.admin_groups)
-    )
-    if is_configured_admin and models.Scope.ALL not in user.scopes:
-        _log.info("Granting configured admin scopes to user %s (%s)", user.id, user.username)
-        user = store.update_user(user.model_copy(update={"scopes": [*user.scopes, models.Scope.ALL]}))
-    return None if user.disabled_at is not None else user
+    signed_in = _admin_now(user, principal, settings)
+    now = pendulum.now(pendulum.UTC)
+    if user.signed_in_at is None or user.signed_in_at < now - _SIGNED_IN_EVERY:
+        signed_in = signed_in.model_copy(update={"signed_in_at": now})
+    if signed_in != user:
+        signed_in = store.update_user(signed_in)
+    return None if signed_in.disabled_at is not None else signed_in
 
 
 def start_session(user: User) -> None:
@@ -262,7 +306,7 @@ def _authenticate(
     if (token := _bearer_dlboard_token()) is not None:
         # Anything claiming to be a dlboard token that doesn't check out (malformed or wrong) is a hard failure -- never quietly fall back to
         # some other identity for a caller that plainly meant to be this one.
-        return _api_tokens.user_for_token(store, token)
+        return _api_tokens.user_for_token(store, token, settings.token_idle)
     if provider.verifies_identity and (user := _session_user(store)) is not None:
         return _api_tokens.Bearer(user, None)
     principal = provider.authenticate()

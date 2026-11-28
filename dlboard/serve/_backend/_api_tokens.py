@@ -108,8 +108,23 @@ def has_api_key(store: DataStore[...], user: User) -> bool:
     return any(_live(token, now) for token in store.list_api_tokens(user.id))
 
 
-def user_for_token(store: DataStore[...], raw: str) -> Bearer | None:
-    """The (enabled) user an unexpired, unrevoked token `raw` authenticates as, and its run, else `None`."""
+def idle(user: User, idle_for: pendulum.Duration | None, now: AwareDatetime) -> bool:
+    """
+    Whether `user`'s tokens no longer work: they haven't signed in through the auth provider within `idle_for`.
+
+    Counted from when they were made, if they never have (`DLBOARD_TOKEN_IDLE_DAYS`); never idle, with no `idle_for`.
+    """
+    return idle_for is not None and (user.signed_in_at or user.created_at) < now - idle_for
+
+
+def user_for_token(
+    store: DataStore[...], raw: str, idle_for: pendulum.Duration | None = None
+) -> Bearer | None:
+    """
+    The (enabled) user an unexpired, unrevoked token `raw` authenticates as, and its run, else `None`.
+
+    Also `None` for a user `idle` for `idle_for`: a token stops with its owner's sign-ins, not only its own expiry.
+    """
     shape = _TOKEN_SHAPE.fullmatch(raw)
     if shape is None:
         return None
@@ -123,7 +138,7 @@ def user_for_token(store: DataStore[...], raw: str) -> Bearer | None:
     ):
         return None
     user = store.get_user(token.user_id)
-    if user is None or user.disabled_at is not None:
+    if user is None or user.disabled_at is not None or idle(user, idle_for, now):
         return None
     if token.last_used_at is None or token.last_used_at < now - _TOUCH_INTERVAL:
         store.touch_api_token(token.id)

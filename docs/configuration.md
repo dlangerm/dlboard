@@ -160,7 +160,8 @@ See [auth.md](plugins/auth.md).
 | `DLBOARD_SESSION_CLOCK_SKEW_SECONDS` | `120` | How far ahead of a replica's own clock a session cookie may be dated (by whichever replica last renewed it) and still be accepted. Replicas never agree to the second, so too little signs people out at random. Keep your nodes on NTP regardless. |
 | `DLBOARD_SECURE_COOKIES` | `true` | Send the session cookie over HTTPS only. Turn off only for plain-HTTP local testing. |
 | `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames granted admin whenever they sign in. How the first admin is made. |
-| `DLBOARD_ADMIN_GROUPS` | none | Comma-separated identity-provider groups whose members are admins. |
+| `DLBOARD_ADMIN_GROUPS` | none | Comma-separated identity-provider groups whose members are admins. One made admin by a group alone stops being one at a sign-in without it. |
+| `DLBOARD_TOKEN_IDLE_DAYS` | none | A user's tokens (API and run tokens) stop working once they haven't signed in through the auth provider for this many days, so someone removed from the identity provider can't go on with a token made before. A user who never signed in counts from when their account was made. Unset, tokens never idle out. |
 | `DLBOARD_TRUSTED_HEADER_ISSUER` | required by `TRUSTED_HEADER_AUTH` | A stable name for the identity source behind the proxy (`sso.example.com`). A user is known by it and the user header together. |
 | `DLBOARD_TRUSTED_HEADER_PROXIES` | required by `TRUSTED_HEADER_AUTH` | Comma-separated addresses or networks (`10.0.0.5`, `172.18.0.0/16`) of the proxy: the only peers whose identity headers are believed, by the connection's own address. |
 | `DLBOARD_TRUSTED_HEADER_USER` | `X-Forwarded-User` | The header with the caller's stable id (an OIDC `sub`), which their account is known by for good. Have the proxy send one that never changes: a different value later is a different, new account. |
