@@ -213,6 +213,8 @@ def test_drawing_another_run_while_looking_at_one_leaves_the_link(
     curves = page.locator(_CURVES)
     rows.filter(has_text=newest).get_by_role("link", name=newest).click()
     expect(curves).to_have_count(1)
+    # The table is drawn again for the link, after the chart: an eye clicked before that is one about to be replaced.
+    expect(rows.filter(has_text=newest)).to_have_class(re.compile(r"dl-run-focused"))
 
     rows.nth(2).locator(".dl-eye").click()
 
