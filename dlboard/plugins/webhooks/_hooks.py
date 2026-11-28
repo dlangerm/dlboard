@@ -5,7 +5,8 @@ A project's webhooks, what one is sent when a run ends, and the one way it is se
 address it has must be a public one (`is_global`: not loopback, private, link-local, carrier-grade NAT, ...) unless an
 admin listed the host in `DLBOARD_WEBHOOK_ALLOWED_HOSTS`, and the request goes to that resolved address (the certificate
 checked against the host's name, `_PinnedAdapter`), so a DNS answer that changes between the check and the request
-(rebinding) can't redirect it. Redirects are not followed, no proxy is used, and the request has short timeouts.
+(rebinding) can't redirect it. Redirects are not followed, no proxy is used, the request has a deadline, and only the
+answer's status is read.
 
 **Signing**: `X-Dlboard-Signature: t=<unix time>,v1=<hex>` is HMAC-SHA256, keyed by the webhook's secret, of
 `<unix time>.<body>`: a receiver checks it, and that the time is recent, to know the request is dlboard's and not a replay.
@@ -15,10 +16,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import queue
 import re
 import secrets
 import socket
 import ssl
+import threading
 import time
 import uuid
 from http import HTTPStatus
@@ -371,37 +374,69 @@ class _PinnedAdapter(HTTPAdapter):
         )
 
 
-def send(hook: Webhook, payload: WebhookPayload, delivery_id: uuid.UUID) -> None:
-    """Post `payload` to `hook`, signed, at an address `_address` allows; `RefusedError` saying why if it didn't land."""
-    address = _address(hook.url)
+def _answered(hook: Webhook, address: IPv4Address | IPv6Address, body: bytes, headers: dict[str, str]) -> int:
+    """Post `body` to `hook` at `address`, and the status it was answered with: the rest of the answer is never read."""
     target = parse_url(str(hook.url))
     pinned = target._replace(host=f"[{address}]" if address.version == 6 else str(address))  # noqa: PLR2004 -- IPv6
-    body = payload.model_dump_json().encode()
     timeout = WebhookSettings().timeout_s
     with requests.Session() as session:
         session.trust_env = False  # a proxy would connect to the host by its name, undoing the address check
         session.mount(f"{target.scheme}://", _PinnedAdapter(urlsplit(str(hook.url)).hostname or ""))
+        with session.post(
+            pinned.url,
+            data=body,
+            headers={"Host": target.netloc or "", **headers},
+            timeout=(timeout, timeout),
+            allow_redirects=False,
+            stream=True,  # the status is all a delivery needs: a body, however big or slow, is left unread
+        ) as response:
+            return response.status_code
+
+
+def send(hook: Webhook, payload: WebhookPayload, delivery_id: uuid.UUID) -> None:
+    """
+    Post `payload` to `hook`, signed, at an address `_address` allows; `RefusedError` saying why if it didn't land.
+
+    A post takes `DLBOARD_WEBHOOK_TIMEOUT_S` twice at the most, to connect and then to be answered, however the
+    receiver trickles its answer (a timeout bounds each read, not their sum): one not answered by then is tried again
+    later, and the thread still waiting on it is let go of, so it holds up no other delivery.
+    """
+    address = _address(hook.url)
+    host = parse_url(str(hook.url)).host
+    body = payload.model_dump_json().encode()
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": f"dlboard/{__version__}",
+        EVENT_HEADER: payload.event,
+        DELIVERY_HEADER: str(delivery_id),
+        SIGNATURE_HEADER: Signature.of(hook.secret, body, int(time.time())).header,
+    }
+    answers: queue.SimpleQueue[int | Exception] = queue.SimpleQueue()
+
+    def post() -> None:
         try:
-            response = session.post(
-                pinned.url,
-                data=body,
-                headers={
-                    "Host": target.netloc or "",
-                    "Content-Type": "application/json",
-                    "User-Agent": f"dlboard/{__version__}",
-                    EVENT_HEADER: payload.event,
-                    DELIVERY_HEADER: str(delivery_id),
-                    SIGNATURE_HEADER: Signature.of(hook.secret, body, int(time.time())).header,
-                },
-                timeout=(timeout, timeout),
-                allow_redirects=False,
-            )
-        except requests.RequestException as error:
-            msg = f"{target.host} didn't answer ({type(error).__name__})"
-            raise RefusedError(msg) from error
-    if not HTTPStatus.OK <= response.status_code < HTTPStatus.MULTIPLE_CHOICES:
-        msg = f"{target.host} answered {response.status_code}"
-        raise RefusedError(msg, Failure.of(response.status_code))
+            answers.put(_answered(hook, address, body, headers))
+        except Exception as error:  # noqa: BLE001 -- said where the post was asked for, below
+            answers.put(error)
+
+    threading.Thread(target=post, name="dlboard-webhook-post", daemon=True).start()
+    deadline_s = 2 * WebhookSettings().timeout_s
+    try:
+        answer = answers.get(timeout=deadline_s)
+    except queue.Empty:
+        msg = f"{host} didn't answer within {deadline_s:g}s"
+        raise RefusedError(msg) from None
+    match answer:
+        case requests.RequestException():
+            msg = f"{host} didn't answer ({type(answer).__name__})"
+            raise RefusedError(msg) from answer
+        case Exception():
+            raise answer
+        case int() if not HTTPStatus.OK <= answer < HTTPStatus.MULTIPLE_CHOICES:
+            msg = f"{host} answered {answer}"
+            raise RefusedError(msg, Failure.of(answer))
+        case int():
+            return
 
 
 def delivery_id(key: str) -> uuid.UUID:

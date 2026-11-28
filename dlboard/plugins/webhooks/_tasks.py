@@ -224,11 +224,12 @@ def deliver(ctx: TaskContext) -> None:
     """Post the deliveries that are due, a batch at a time."""
     this_pass = _DeliveryPass(ctx, get_system_data_store(ctx.app))
     while not ctx.should_stop():
-        claimed = ctx.claim(WebhookWork.DELIVERY, limit=_DELIVERIES)
+        with ctx.batch():
+            claimed = ctx.claim(WebhookWork.DELIVERY, limit=_DELIVERIES)
+            for item in claimed:
+                this_pass.settle(item)
         if not claimed:
             break
-        for item in claimed:
-            this_pass.settle(item)
     if this_pass.expired:
         _log.warning(
             "Dropped webhook deliveries of runs that ended too long ago to post",
