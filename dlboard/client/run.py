@@ -17,6 +17,7 @@ logs to the server -- metrics, and artifacts -- so the training loop never waits
 from __future__ import annotations
 
 import atexit
+import contextlib
 import functools
 import json
 import signal
@@ -54,7 +55,7 @@ from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI, classi
 from dlboard.client._warnings import warn
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.histograms import DEFAULT_BINNING
-from dlboard.models import Histogram
+from dlboard.models import SYSTEM_METRIC_PREFIX, Histogram
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -166,6 +167,8 @@ class _Shipper(Generic[T]):
     unflushed: bool = field(default=False, init=False)
     """Whether anything was queued since the last flush that saw it shipped."""
     _dropped_total: int = field(default=0, init=False)
+    dropped: int = field(default=0, init=False)
+    """Everything dropped since the run started, never reset: a run's system metrics chart it (`levels`)."""
     _dropped_since_warning: int = field(default=0, init=False)
     _last_drop_warning: float = field(default=0.0, init=False)
     _refused_reported: int = field(default=0, init=False)
@@ -222,8 +225,22 @@ class _Shipper(Generic[T]):
         )
         return True
 
+    def levels(self) -> dict[str, float]:
+        """
+        How full the queue is now, and how much it has dropped, as system metrics (`system/dlboard.metrics.queue_depth`).
+
+        A depth near its `RunSettings` size means the shipping process can't keep up, or the server is slow or down: what
+        comes after is dropped. The depth is left out where a queue can't be counted (macOS).
+        """
+        prefix = f"{SYSTEM_METRIC_PREFIX}dlboard.{self.name}"
+        depth: dict[str, float] = {}
+        with contextlib.suppress(NotImplementedError):  # macOS can't count a queue's items
+            depth[f"{prefix}.queue_depth"] = float(self.worker.queue.qsize())
+        return {**depth, f"{prefix}.dropped": float(self.dropped)}
+
     def _drop(self, why: str) -> None:
         self._dropped_total += 1
+        self.dropped += 1
         self._dropped_since_warning += 1
         now = time.monotonic()
         if now - self._last_drop_warning > _DROP_WARNING_INTERVAL_SEC:
@@ -527,6 +544,56 @@ def _log_system(run: Callable[[], Run | None], values: Mapping[str, float]) -> N
         alive.log_metrics(values, step=alive.step)
 
 
+class _QueueSampler:
+    """
+    The shipping queues' levels (`_Shipper.levels`), logged into the run every `interval_s` beside its system metrics.
+
+    Read here, where the queues are, and needing no extra: a queue is counted, not read through OpenTelemetry. On with
+    the run's system metrics (`DLBOARD_SYSTEM_METRICS_*`), at their interval.
+    """
+
+    def __init__(
+        self, interval_s: float, shippers: Sequence[_Shipper[Any]], log: Callable[[Mapping[str, float]], None]
+    ) -> None:
+        self._interval_s, self._shippers, self._log = interval_s, shippers, log
+        self._stopped = threading.Event()
+        self._thread = threading.Thread(
+            target=self._sample_until_stopped, name="dlboard-queue-levels", daemon=True
+        )
+
+    @classmethod
+    def start(
+        cls,
+        settings: SystemMetricsSettings,
+        shippers: Sequence[_Shipper[Any]],
+        log: Callable[[Mapping[str, float]], None],
+    ) -> _QueueSampler | None:
+        """Start sampling, or `None` with system metrics turned off."""
+        if not settings.enabled:
+            return None
+        sampler = cls(settings.interval_s, shippers, log)
+        sampler._thread.start()
+        return sampler
+
+    def _sample_until_stopped(self) -> None:
+        warned = False
+        while not self._stopped.wait(self._interval_s):
+            try:
+                self._log(
+                    {key: value for shipper in self._shippers for key, value in shipper.levels().items()}
+                )
+            except Exception as exc:  # noqa: BLE001 -- a sample must never end training, nor the sampling
+                if not warned:
+                    warned = True
+                    warn(f"dlboard could not log its shipping queues' levels; trying again as usual: {exc}")
+
+    def stop(self) -> None:
+        """Sample no more."""
+        self._stopped.set()
+        if self._thread.is_alive() and self._thread is not threading.current_thread():
+            self._thread.join(1.0)
+
+
 def _log_console(run: Callable[[], Run | None], chunk: ConsoleChunk) -> None:
     """Log a chunk of console output into `run` (a weak reference, as `_log_system`'s), as the artifact it is."""
     if (alive := run()) is not None:
@@ -645,6 +712,11 @@ class Run:
             started._record_context(settings.context)
         alive = weakref.ref(started)  # held weakly, so a run nothing uses any more is still collected
         started._attach(system.start(settings.system_metrics, functools.partial(_log_system, alive)))
+        started._attach(
+            _QueueSampler.start(
+                settings.system_metrics, (metrics, artifacts), functools.partial(_log_system, alive)
+            )
+        )
         started._attach(ConsoleCapture.start(settings.console, functools.partial(_log_console, alive)))
         started._attach(Heartbeat.start(functools.partial(api.heartbeat, run_id)))
         return started

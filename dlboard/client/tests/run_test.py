@@ -31,6 +31,7 @@ from hypothesis import strategies as st
 from dlboard import models
 from dlboard._batching import Failure
 from dlboard._mp_context import SPAWN_CONTEXT
+from dlboard._telemetry.system import SystemMetricsSettings
 from dlboard.client import _context, run
 from dlboard.client._console import ConsoleChunk, ConsoleSettings
 from dlboard.client._rest_api import classify_failure
@@ -40,7 +41,7 @@ from dlboard.client.artifacts.overlay import Overlay
 from dlboard.client.histograms import ExplicitBinning, ExponentialBinning
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
     from dlboard.client.tests.conftest import FakeAPI, FakeShipper
 
@@ -481,6 +482,43 @@ def test_threads_that_find_the_process_dead_at_once_start_it_again_once() -> Non
     assert shipper.worker is spares[0]
     assert {spares[0].queue.get_nowait() for _ in range(8)} == {str(i) for i in range(8)}
     assert all(spare.queue.empty() for spare in spares)
+
+
+def test_a_shippers_levels_are_its_depth_now_and_everything_it_dropped_since_the_run_started() -> None:
+    """#817: what a run's system metrics chart, to size a queue from, or see it was close to dropping."""
+    worker = _worker(maxsize=2)
+    shipper = _shipper(worker)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        for item in "abc":  # the third finds the queue full
+            shipper.put(item)
+        assert shipper.levels() == {
+            "system/dlboard.test.queue_depth": 2.0,
+            "system/dlboard.test.dropped": 1.0,
+        }
+        _killed(worker)
+        shipper.flush(time.monotonic())  # says the total dropped, and starts that warning's count over
+
+    assert shipper.levels()["system/dlboard.test.dropped"] == 1.0  # the run's total is never started over
+
+
+def test_the_queue_levels_are_logged_at_the_system_metrics_interval_until_stopped() -> None:
+    shipper = _shipper(_worker())
+    logged: list[dict[str, float]] = []
+    sampled = threading.Event()
+
+    def log(values: Mapping[str, float]) -> None:
+        logged.append(dict(values))
+        sampled.set()
+
+    every_10ms = SystemMetricsSettings.model_construct(enabled=True, interval_s=0.01, gpu=False)
+    sampler = run._QueueSampler.start(every_10ms, [shipper], log)
+    assert sampler is not None
+    assert sampled.wait(10)
+    sampler.stop()
+
+    assert logged[0] == {"system/dlboard.test.queue_depth": 0.0, "system/dlboard.test.dropped": 0.0}
+    assert run._QueueSampler.start(SystemMetricsSettings(enabled=False), [shipper], log) is None
 
 
 def test_shipper_flush_gives_up_at_its_deadline_and_says_what_the_server_refused() -> None:

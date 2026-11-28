@@ -134,6 +134,7 @@ Each sample is ordinary metrics under `system/` (`system/cpu.utilization`, `syst
 named after OpenTelemetry's semantic conventions), at the run's training step when it was taken (the last step it logged metrics or histograms at, 0 before the first), so they line up with the run's other charts; auto-generate charts them in a `system` panel.
 They are read through OpenTelemetry instruments on a meter provider of the run's own: it is never made the global one, and nothing is exported anywhere but to the dlboard server.
 Sampling runs on a thread of its own in the training process (process metrics have to describe it), from the moment the run starts until it is finished, and costs a handful of rows per sample: 8 GPUs and the host are about 70 rows a minute.
+With or without the extras, each sample also has the run's own shipping queues: `system/dlboard.metrics.queue_depth` and `system/dlboard.artifacts.queue_depth`, how many items wait to be shipped, and `system/dlboard.metrics.dropped` and `system/dlboard.artifacts.dropped`, how many it has dropped since it started (see "If the server (or your network) is down", below).
 Set `DLBOARD_SYSTEM_METRICS_INTERVAL_S` to sample less often, or `DLBOARD_SYSTEM_METRICS_ENABLED=false` (or `RunSettings(system_metrics=...)`) to turn it off.
 Only rank 0 samples, so a multi-node job covers rank 0's node.
 
@@ -190,6 +191,8 @@ For a long run, log less often rather than expecting every step to be cheap:
 **If the server (or your network) is down.**
 Logging never blocks training, and never fails it: `log_metrics`/ `log_artifact` queue onto a bounded buffer the shipping processes drain in the background, retrying a failure with exponential backoff rather than hammering a server that's still down.
 If the buffer fills faster than it can drain, the item being logged is dropped (not blocked on), with a rate-limited warning while it keeps happening and a final count at `finalize()`.
+The run's system metrics chart how full each buffer was over the run (`system/dlboard.metrics.queue_depth`, `system/dlboard.artifacts.queue_depth`) and how much was dropped: a depth that climbs toward `metrics_q_size` (500) or `artifact_q_size` (100) means the shipping process can't keep up or the server is slow, and drops follow once it gets there.
+A depth that stays near zero says the buffers are bigger than this script needs.
 Size the buffers with `RunSettings` (`DLBoardLoggerSettings` for the logger; `metrics_q_size`, `artifact_q_size`, ...) if your logging rate is high enough that this matters; `DLBOARD_CONNECT_TIMEOUT_S`/`DLBOARD_READ_TIMEOUT_S` (defaults 10s/60s) cap how long any one request waits before it's treated as failed, and `finalize()` waits at most 60s for both shipping processes together, however long the server stays down.
 
 What the server refuses for good is dropped rather than retried, and `finalize()` warns how much.
